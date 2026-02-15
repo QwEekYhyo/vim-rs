@@ -1,6 +1,5 @@
 use color_eyre::eyre::Context;
-use std::io::Read;
-use std::os::fd::FromRawFd;
+use std::io::{Read, Write};
 
 use cvt::cvt;
 use libc::{ECHO, ICANON, ISIG, STDIN_FILENO, TCSAFLUSH, TCSANOW};
@@ -9,14 +8,27 @@ use libc::{ECHO, ICANON, ISIG, STDIN_FILENO, TCSAFLUSH, TCSANOW};
 struct State {
     previous_io_settings: libc::termios,
     current_io_settings: libc::termios,
+    stdout: std::io::Stdout,
 }
 
 impl Drop for State {
     fn drop(&mut self) {
+        let mut lock = self.stdout.lock();
+        let _ = lock.write(b"\x1b[?1049l");
         unsafe {
             libc::tcsetattr(STDIN_FILENO, TCSANOW, &raw const self.previous_io_settings);
         }
     }
+}
+
+fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
+    let mut lock = state.stdout.lock();
+    lock.write(b"\x1b[?1049h\x1b[2J\x1b[HWelcome to Vim-rs")
+        .wrap_err("Could not write to stdout")?;
+
+    lock.flush().wrap_err("Failed to flush stdout")?;
+
+    Ok(())
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -28,6 +40,7 @@ fn main() -> color_eyre::Result<()> {
     let mut state = State {
         previous_io_settings: termios,
         current_io_settings: termios,
+        stdout: std::io::stdout(),
     };
 
     // TODO: use cfmakeraw instead
@@ -42,12 +55,13 @@ fn main() -> color_eyre::Result<()> {
     })
     .wrap_err("Could not set terminal parameters")?;
 
-    let mut stdin = unsafe { std::fs::File::from_raw_fd(STDIN_FILENO) };
     let mut buffer = [0u8; 1];
 
+    draw_ui(&mut state)?;
+
+    let mut lock = std::io::stdin().lock();
     loop {
-        stdin
-            .read_exact(&mut buffer)
+        lock.read_exact(&mut buffer)
             .wrap_err("Could not read character from standard input")?;
         let c = buffer[0];
         if c == b'v' {
@@ -56,9 +70,6 @@ fn main() -> color_eyre::Result<()> {
             break;
         }
     }
-    // Do not close stdin or else bad things will happen
-    // eg. next ioctl will fail and we won't be able to restore termios
-    std::mem::forget(stdin);
 
     Ok(())
 }
