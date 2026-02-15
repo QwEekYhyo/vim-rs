@@ -1,0 +1,9 @@
+[package]
+name = "vim-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+color-eyre = "0.6.5"
+cvt = "0.1.2"
+libc = "0.2.182"
