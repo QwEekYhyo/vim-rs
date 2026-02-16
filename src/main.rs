@@ -52,7 +52,7 @@ fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
         write(&mut lock, b"~ \x1b[1B\x1b[2D")?;
     }
 
-    write(&mut lock, b"\x1b8")?;
+    write(&mut lock, b"\x1b8\x1b[25m")?;
 
     flush(&mut lock)
 }
