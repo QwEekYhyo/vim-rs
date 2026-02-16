@@ -24,7 +24,10 @@ struct State {
     current_io_settings: libc::termios,
     stdout: std::io::Stdout,
     window_size: WindowSize,
+    cursor_pos: WindowSize,
 }
+
+const STARTING_COL: u16 = 2;
 
 impl Drop for State {
     fn drop(&mut self) {
@@ -37,8 +40,12 @@ impl Drop for State {
     }
 }
 
-fn write(lock: &mut std::io::StdoutLock, buffer: &[u8]) -> color_eyre::Result<usize> {
-    lock.write(buffer).wrap_err("Could not write to stdout")
+macro_rules! term_write {
+    ($lock:expr, $($arg:tt)*) => {{
+        use std::io::Write;
+        write!($lock, $($arg)*)
+            .wrap_err("Could not write to stdout")
+    }};
 }
 
 fn flush(lock: &mut std::io::StdoutLock) -> color_eyre::Result<()> {
@@ -67,7 +74,7 @@ fn get_window_size() -> Option<WindowSize> {
 fn init_ui(state: &mut State) -> color_eyre::Result<()> {
     let mut lock = state.stdout.lock();
     // Enable alt buffer, move cursor to 0,0, move cursor right 2 columns
-    write(&mut lock, b"\x1b[?1049h\x1b[H\x1b[2C")?;
+    term_write!(&mut lock, "\x1b[?1049h\x1b[H\x1b[{STARTING_COL}C")?;
 
     draw_ui(state)
 }
@@ -77,21 +84,21 @@ fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
 
     let mut lock = state.stdout.lock();
     // Save cursor pos, clear screen, move cursor to 0,0
-    write(&mut lock, b"\x1b7\x1b[2J\x1b[H")?;
+    term_write!(&mut lock, "\x1b7\x1b[2J\x1b[H")?;
 
     for _ in 0..state.window_size.row - 2 {
         // Write ~ , go down 1 line, go left 2 columns
-        write(&mut lock, b"~ \x1b[1B\x1b[2D")?;
+        term_write!(&mut lock, "~ \x1b[1B\x1b[2D")?;
     }
 
     // Set background color and erase it in line
-    write(
+    term_write!(
         &mut lock,
-        b"\x1b[48;2;30;32;48m This is the overlay\x1b[K\x1b[0m",
+        "\x1b[48;2;30;32;48m This is the overlay\x1b[K\x1b[0m",
     )?;
 
     // Restore saved cursor pos + set blinking mode
-    write(&mut lock, b"\x1b8\x1b[25m")?;
+    term_write!(&mut lock, "\x1b8\x1b[25m")?;
 
     flush(&mut lock)
 }
@@ -109,6 +116,10 @@ fn main() -> color_eyre::Result<()> {
         current_io_settings: termios,
         stdout: std::io::stdout(),
         window_size: get_window_size().ok_or_eyre("Could not get window size")?,
+        cursor_pos: WindowSize {
+            col: STARTING_COL,
+            row: 0,
+        },
     };
 
     // TODO: use cfmakeraw instead
@@ -136,18 +147,40 @@ fn main() -> color_eyre::Result<()> {
         let mut stdout_lock = state.stdout.lock();
 
         let c = buffer[0];
-        if c == b'v' {
-            println!("received v input");
-        } else if c == b'h' {
-            write(&mut stdout_lock, b"\x1b[1D")?;
-        } else if c == b'j' {
-            write(&mut stdout_lock, b"\x1b[1B")?;
-        } else if c == b'k' {
-            write(&mut stdout_lock, b"\x1b[1A")?;
-        } else if c == b'l' {
-            write(&mut stdout_lock, b"\x1b[1C")?;
-        } else if c == b'q' {
-            break;
+        match c {
+            b'h' => {
+                if state.cursor_pos.col <= STARTING_COL {
+                    continue;
+                }
+                state.cursor_pos.col -= 1;
+                term_write!(&mut stdout_lock, "\x1b[1D")?;
+            }
+            b'j' => {
+                if state.cursor_pos.row >= state.window_size.row - 3 {
+                    continue;
+                }
+                state.cursor_pos.row += 1;
+                term_write!(&mut stdout_lock, "\x1b[1B")?;
+            }
+            b'k' => {
+                if state.cursor_pos.row == 0 {
+                    continue;
+                }
+                state.cursor_pos.row -= 1;
+                term_write!(&mut stdout_lock, "\x1b[1A")?;
+            }
+            b'l' => {
+                if state.cursor_pos.col >= state.window_size.col - 1 {
+                    continue;
+                }
+                state.cursor_pos.col += 1;
+                term_write!(&mut stdout_lock, "\x1b[1C")?;
+            }
+            b'q' => {
+                break;
+            }
+
+            _ => {}
         }
 
         draw_ui(&mut state).wrap_err("Failed to draw UI")?;
