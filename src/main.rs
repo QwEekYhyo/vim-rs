@@ -9,6 +9,7 @@ struct State {
     previous_io_settings: libc::termios,
     current_io_settings: libc::termios,
     stdout: std::io::Stdout,
+    displayed_lines: u32,
 }
 
 impl Drop for State {
@@ -21,10 +22,27 @@ impl Drop for State {
     }
 }
 
+fn init_ui(state: &mut State) -> color_eyre::Result<()> {
+    let mut lock = state.stdout.lock();
+    lock.write(b"\x1b[?1049h\x1b[H\x1b[2C")
+        .wrap_err("Could not write to stdout")?;
+
+    lock.flush().wrap_err("Failed to flush stdout")?;
+
+    Ok(())
+}
+
 fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
     let mut lock = state.stdout.lock();
-    lock.write(b"\x1b[?1049h\x1b[2J\x1b[HWelcome to Vim-rs")
+    lock.write(b"\x1b7\x1b[2J\x1b[H")
         .wrap_err("Could not write to stdout")?;
+
+    for _ in 0..state.displayed_lines {
+        lock.write(b"~ \x1b[1B\x1b[2D")
+            .wrap_err("Could not write to stdout")?;
+    }
+
+    lock.write(b"\x1b8").wrap_err("Could not write to stdout")?;
 
     lock.flush().wrap_err("Failed to flush stdout")?;
 
@@ -41,6 +59,7 @@ fn main() -> color_eyre::Result<()> {
         previous_io_settings: termios,
         current_io_settings: termios,
         stdout: std::io::stdout(),
+        displayed_lines: 25,
     };
 
     // TODO: use cfmakeraw instead
@@ -57,11 +76,14 @@ fn main() -> color_eyre::Result<()> {
 
     let mut buffer = [0u8; 1];
 
-    draw_ui(&mut state)?;
+    init_ui(&mut state).wrap_err("Failed to initialize UI")?;
 
-    let mut lock = std::io::stdin().lock();
+    let mut stdin_lock = std::io::stdin().lock();
     loop {
-        lock.read_exact(&mut buffer)
+        draw_ui(&mut state).wrap_err("Failed to draw UI")?;
+
+        stdin_lock
+            .read_exact(&mut buffer)
             .wrap_err("Could not read character from standard input")?;
         let c = buffer[0];
         if c == b'v' {
