@@ -1,8 +1,13 @@
 use color_eyre::eyre::Context;
+use log::debug;
 use std::io::{Read, Write};
 
 use cvt::cvt;
 use libc::{ECHO, ICANON, ISIG, STDIN_FILENO, TCSAFLUSH, TCSANOW};
+
+use crate::logger::setup_logger;
+
+mod logger;
 
 #[derive(Debug)]
 struct State {
@@ -33,6 +38,8 @@ fn init_ui(state: &mut State) -> color_eyre::Result<()> {
 }
 
 fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
+    debug!("UI redrawn");
+
     let mut lock = state.stdout.lock();
     lock.write(b"\x1b7\x1b[2J\x1b[H")
         .wrap_err("Could not write to stdout")?;
@@ -50,6 +57,8 @@ fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
 }
 
 fn main() -> color_eyre::Result<()> {
+    setup_logger()?;
+
     let mut termios: libc::termios = unsafe { std::mem::zeroed() };
 
     cvt(unsafe { libc::tcgetattr(STDIN_FILENO, &raw mut termios) })

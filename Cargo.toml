@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+chrono = "0.4.43"
 color-eyre = "0.6.5"
 cvt = "0.1.2"
+fern = "0.7.1"
 libc = "0.2.182"
+log = "0.4.29"
