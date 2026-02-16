@@ -39,7 +39,7 @@ fn init_ui(state: &mut State) -> color_eyre::Result<()> {
     let mut lock = state.stdout.lock();
     write(&mut lock, b"\x1b[?1049h\x1b[H\x1b[2C")?;
 
-    flush(&mut lock)
+    draw_ui(state)
 }
 
 fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
@@ -90,8 +90,6 @@ fn main() -> color_eyre::Result<()> {
 
     let mut stdin_lock = std::io::stdin().lock();
     loop {
-        draw_ui(&mut state).wrap_err("Failed to draw UI")?;
-
         stdin_lock
             .read_exact(&mut buffer)
             .wrap_err("Could not read character from standard input")?;
@@ -113,7 +111,7 @@ fn main() -> color_eyre::Result<()> {
             break;
         }
 
-        flush(&mut stdout_lock)?;
+        draw_ui(&mut state).wrap_err("Failed to draw UI")?;
     }
 
     Ok(())
