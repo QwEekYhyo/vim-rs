@@ -27,14 +27,17 @@ impl Drop for State {
     }
 }
 
+fn write(lock: &mut std::io::StdoutLock, buffer: &[u8]) -> color_eyre::Result<usize> {
+    lock.write(buffer).wrap_err("Could not write to stdout")
+}
+
 fn flush(lock: &mut std::io::StdoutLock) -> color_eyre::Result<()> {
     lock.flush().wrap_err("Failed to flush stdout")
 }
 
 fn init_ui(state: &mut State) -> color_eyre::Result<()> {
     let mut lock = state.stdout.lock();
-    lock.write(b"\x1b[?1049h\x1b[H\x1b[2C")
-        .wrap_err("Could not write to stdout")?;
+    write(&mut lock, b"\x1b[?1049h\x1b[H\x1b[2C")?;
 
     flush(&mut lock)
 }
@@ -43,15 +46,13 @@ fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
     debug!("UI redrawn");
 
     let mut lock = state.stdout.lock();
-    lock.write(b"\x1b7\x1b[2J\x1b[H")
-        .wrap_err("Could not write to stdout")?;
+    write(&mut lock, b"\x1b7\x1b[2J\x1b[H")?;
 
     for _ in 0..state.displayed_lines {
-        lock.write(b"~ \x1b[1B\x1b[2D")
-            .wrap_err("Could not write to stdout")?;
+        write(&mut lock, b"~ \x1b[1B\x1b[2D")?;
     }
 
-    lock.write(b"\x1b8").wrap_err("Could not write to stdout")?;
+    write(&mut lock, b"\x1b8")?;
 
     flush(&mut lock)
 }
@@ -101,21 +102,13 @@ fn main() -> color_eyre::Result<()> {
         if c == b'v' {
             println!("received v input");
         } else if c == b'h' {
-            stdout_lock
-                .write(b"\x1b[1D")
-                .wrap_err("Could not write to stdout")?;
+            write(&mut stdout_lock, b"\x1b[1D")?;
         } else if c == b'j' {
-            stdout_lock
-                .write(b"\x1b[1B")
-                .wrap_err("Could not write to stdout")?;
+            write(&mut stdout_lock, b"\x1b[1B")?;
         } else if c == b'k' {
-            stdout_lock
-                .write(b"\x1b[1A")
-                .wrap_err("Could not write to stdout")?;
+            write(&mut stdout_lock, b"\x1b[1A")?;
         } else if c == b'l' {
-            stdout_lock
-                .write(b"\x1b[1C")
-                .wrap_err("Could not write to stdout")?;
+            write(&mut stdout_lock, b"\x1b[1C")?;
         } else if c == b'q' {
             break;
         }
