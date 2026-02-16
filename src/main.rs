@@ -81,8 +81,6 @@ fn init_ui(state: &mut State) -> color_eyre::Result<()> {
 }
 
 fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
-    debug!("UI redrawn");
-
     let mut lock = state.stdout.lock();
     // Save cursor pos, clear screen, move cursor to 0,0
     term_write!(&mut lock, "\x1b7\x1b[2J\x1b[H")?;
@@ -91,7 +89,12 @@ fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
         // Write ~ , go down 1 line, go left 2 columns
         term_write!(
             &mut lock,
-            "~  {}\x1b[1E",
+            "~  {}{}\x1b[K\x1b[0m\x1b[1E",
+            if n_line == state.cursor_pos.row {
+                "\x1b[48;2;54;58;79m"
+            } else {
+                ""
+            },
             state
                 .text_lines
                 .get(n_line as usize)
