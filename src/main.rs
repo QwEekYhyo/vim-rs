@@ -94,12 +94,33 @@ fn main() -> color_eyre::Result<()> {
         stdin_lock
             .read_exact(&mut buffer)
             .wrap_err("Could not read character from standard input")?;
+
+        let mut stdout_lock = state.stdout.lock();
+
         let c = buffer[0];
         if c == b'v' {
             println!("received v input");
+        } else if c == b'h' {
+            stdout_lock
+                .write(b"\x1b[1D")
+                .wrap_err("Could not write to stdout")?;
+        } else if c == b'j' {
+            stdout_lock
+                .write(b"\x1b[1B")
+                .wrap_err("Could not write to stdout")?;
+        } else if c == b'k' {
+            stdout_lock
+                .write(b"\x1b[1A")
+                .wrap_err("Could not write to stdout")?;
+        } else if c == b'l' {
+            stdout_lock
+                .write(b"\x1b[1C")
+                .wrap_err("Could not write to stdout")?;
         } else if c == b'q' {
             break;
         }
+
+        stdout_lock.flush().wrap_err("Failed to flush stdout")?;
     }
 
     Ok(())
