@@ -1,25 +1,35 @@
-use color_eyre::eyre::Context;
+use color_eyre::eyre::{Context, OptionExt};
 use log::debug;
 use std::io::{Read, Write};
 
 use cvt::cvt;
-use libc::{ECHO, ICANON, ISIG, STDIN_FILENO, TCSAFLUSH, TCSANOW};
+use libc::{
+    ECHO, ICANON, ISIG, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO, TCSAFLUSH, TCSANOW, TIOCGWINSZ,
+};
 
 use crate::logger::setup_logger;
 
 mod logger;
+
+#[allow(dead_code)]
+#[derive(Debug)]
+struct WindowSize {
+    col: u16,
+    row: u16,
+}
 
 #[derive(Debug)]
 struct State {
     previous_io_settings: libc::termios,
     current_io_settings: libc::termios,
     stdout: std::io::Stdout,
-    displayed_lines: u32,
+    window_size: WindowSize,
 }
 
 impl Drop for State {
     fn drop(&mut self) {
         let mut lock = self.stdout.lock();
+        // Disable alt buffer
         let _ = lock.write(b"\x1b[?1049l");
         unsafe {
             libc::tcsetattr(STDIN_FILENO, TCSANOW, &raw const self.previous_io_settings);
@@ -35,8 +45,28 @@ fn flush(lock: &mut std::io::StdoutLock) -> color_eyre::Result<()> {
     lock.flush().wrap_err("Failed to flush stdout")
 }
 
+fn get_window_size() -> Option<WindowSize> {
+    let mut window_size: libc::winsize;
+    unsafe {
+        window_size = std::mem::zeroed();
+
+        for stream in [STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO] {
+            let error = libc::ioctl(stream, TIOCGWINSZ, &raw mut window_size);
+            if error == 0 {
+                return Some(WindowSize {
+                    col: window_size.ws_col,
+                    row: window_size.ws_row,
+                });
+            }
+        }
+    }
+
+    None
+}
+
 fn init_ui(state: &mut State) -> color_eyre::Result<()> {
     let mut lock = state.stdout.lock();
+    // Enable alt buffer, move cursor to 0,0, move cursor right 2 columns
     write(&mut lock, b"\x1b[?1049h\x1b[H\x1b[2C")?;
 
     draw_ui(state)
@@ -46,12 +76,21 @@ fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
     debug!("UI redrawn");
 
     let mut lock = state.stdout.lock();
+    // Save cursor pos, clear screen, move cursor to 0,0
     write(&mut lock, b"\x1b7\x1b[2J\x1b[H")?;
 
-    for _ in 0..state.displayed_lines {
+    for _ in 0..state.window_size.row - 2 {
+        // Write ~ , go down 1 line, go left 2 columns
         write(&mut lock, b"~ \x1b[1B\x1b[2D")?;
     }
 
+    // Set background color and erase it in line
+    write(
+        &mut lock,
+        b"\x1b[48;2;30;32;48m This is the overlay\x1b[K\x1b[0m",
+    )?;
+
+    // Restore saved cursor pos + set blinking mode
     write(&mut lock, b"\x1b8\x1b[25m")?;
 
     flush(&mut lock)
@@ -69,7 +108,7 @@ fn main() -> color_eyre::Result<()> {
         previous_io_settings: termios,
         current_io_settings: termios,
         stdout: std::io::stdout(),
-        displayed_lines: 25,
+        window_size: get_window_size().ok_or_eyre("Could not get window size")?,
     };
 
     // TODO: use cfmakeraw instead
