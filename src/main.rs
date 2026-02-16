@@ -25,9 +25,10 @@ struct State {
     stdout: std::io::Stdout,
     window_size: WindowSize,
     cursor_pos: WindowSize,
+    text_lines: Vec<String>,
 }
 
-const STARTING_COL: u16 = 2;
+const STARTING_COL: u16 = 3;
 
 impl Drop for State {
     fn drop(&mut self) {
@@ -86,9 +87,16 @@ fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
     // Save cursor pos, clear screen, move cursor to 0,0
     term_write!(&mut lock, "\x1b7\x1b[2J\x1b[H")?;
 
-    for _ in 0..state.window_size.row - 2 {
+    for n_line in 0..state.window_size.row - 2 {
         // Write ~ , go down 1 line, go left 2 columns
-        term_write!(&mut lock, "~ \x1b[1B\x1b[2D")?;
+        term_write!(
+            &mut lock,
+            "~  {}\x1b[1E",
+            state
+                .text_lines
+                .get(n_line as usize)
+                .map_or("", |line| line.as_str())
+        )?;
     }
 
     // Set background color and erase it in line
@@ -120,6 +128,13 @@ fn main() -> color_eyre::Result<()> {
             col: STARTING_COL,
             row: 0,
         },
+        text_lines: vec![
+            "#include <stdio.h>".to_string(),
+            "".to_string(),
+            "int main(void) {".to_string(),
+            "    return 0;".to_string(),
+            "}".to_string(),
+        ],
     };
 
     // TODO: use cfmakeraw instead
