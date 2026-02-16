@@ -27,14 +27,16 @@ impl Drop for State {
     }
 }
 
+fn flush(lock: &mut std::io::StdoutLock) -> color_eyre::Result<()> {
+    lock.flush().wrap_err("Failed to flush stdout")
+}
+
 fn init_ui(state: &mut State) -> color_eyre::Result<()> {
     let mut lock = state.stdout.lock();
     lock.write(b"\x1b[?1049h\x1b[H\x1b[2C")
         .wrap_err("Could not write to stdout")?;
 
-    lock.flush().wrap_err("Failed to flush stdout")?;
-
-    Ok(())
+    flush(&mut lock)
 }
 
 fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
@@ -51,9 +53,7 @@ fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
 
     lock.write(b"\x1b8").wrap_err("Could not write to stdout")?;
 
-    lock.flush().wrap_err("Failed to flush stdout")?;
-
-    Ok(())
+    flush(&mut lock)
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -120,7 +120,7 @@ fn main() -> color_eyre::Result<()> {
             break;
         }
 
-        stdout_lock.flush().wrap_err("Failed to flush stdout")?;
+        flush(&mut stdout_lock)?;
     }
 
     Ok(())
