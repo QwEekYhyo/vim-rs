@@ -2,7 +2,7 @@ use color_eyre::eyre::{Context, OptionExt};
 use log::debug;
 use std::{
     collections::VecDeque,
-    io::{Read, Write},
+    io::{Read, Write, stdout},
 };
 
 use cvt::cvt;
@@ -37,7 +37,6 @@ enum Mode {
 struct State {
     previous_io_settings: libc::termios,
     current_io_settings: libc::termios,
-    stdout: std::io::Stdout,
     window_size: WindowSize,
     cursor_pos: WindowSize,
     text_lines: Vec<String>,
@@ -49,7 +48,7 @@ const STARTING_COL: usize = 3;
 
 impl Drop for State {
     fn drop(&mut self) {
-        let mut lock = self.stdout.lock();
+        let mut lock = stdout().lock();
         // Disable alt buffer
         let _ = lock.write(b"\x1b[?1049l");
         unsafe {
@@ -101,7 +100,7 @@ impl State {
     }
 
     fn init_ui(&mut self) -> color_eyre::Result<()> {
-        let mut lock = self.stdout.lock();
+        let mut lock = stdout().lock();
         // Enable alt buffer, move cursor to 0,0, move cursor right STARTING_COL columns
         term_write!(&mut lock, "\x1b[?1049h\x1b[H\x1b[{STARTING_COL}C")?;
 
@@ -109,7 +108,7 @@ impl State {
     }
 
     fn draw_ui(&mut self) -> color_eyre::Result<()> {
-        let mut lock = self.stdout.lock();
+        let mut lock = stdout().lock();
         // Save cursor pos, clear screen, move cursor to 0,0
         term_write!(&mut lock, "\x1b7\x1b[2J\x1b[H")?;
 
@@ -157,7 +156,7 @@ impl State {
 
     /// Returns true if the program should continue
     fn handle_keypress_normal(&mut self, c: u8) -> color_eyre::Result<bool> {
-        let mut stdout_lock = self.stdout.lock();
+        let mut stdout_lock = stdout().lock();
 
         match c {
             b'h' => {
@@ -237,7 +236,6 @@ fn main() -> color_eyre::Result<()> {
     let mut state = State {
         previous_io_settings: termios,
         current_io_settings: termios,
-        stdout: std::io::stdout(),
         window_size: get_window_size().ok_or_eyre("Could not get window size")?,
         cursor_pos: WindowSize { col: 0, row: 0 },
         text_lines: vec![
@@ -280,7 +278,7 @@ fn main() -> color_eyre::Result<()> {
                 .handle_keypress_normal(c)
                 .wrap_err("Error while handling keypress [NORMAL]")?,
             Mode::Insertion => {
-                let mut stdout_lock = state.stdout.lock();
+                let mut stdout_lock = stdout().lock();
 
                 if c == 27 {
                     // ESC
