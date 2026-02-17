@@ -223,6 +223,43 @@ impl State {
 
         Ok(true)
     }
+
+    /// Returns true if the program should continue
+    fn handle_keypress_insertion(&mut self, c: u8) -> color_eyre::Result<bool> {
+        let mut stdout_lock = stdout().lock();
+
+        if c == 27 {
+            // ESC
+            self.current_mode = Mode::Normal;
+
+            if let Some(mut gap) = self.edited_line.take()
+                && let Some(line) = self.get_current_line_mut()
+            {
+                line.reserve(gap.start.len() + gap.end.len());
+                line.clear();
+                line.extend(gap.start.drain(..));
+                line.extend(gap.end.drain(..));
+            }
+        } else if c == 127 {
+            // BACKSPACE
+            if self.cursor_pos.col != 0
+                && let Some(gap) = &mut self.edited_line
+                && gap.start.pop().is_some()
+            {
+                self.cursor_pos.col -= 1;
+                term_write!(&mut stdout_lock, "\x1b[1D")?;
+            }
+        } else if c.is_ascii_graphic() || c == b' ' {
+            // TODO: check end of window
+            if let Some(gap) = &mut self.edited_line {
+                gap.start.push(c as char);
+                self.cursor_pos.col += 1;
+                term_write!(&mut stdout_lock, "\x1b[1C")?;
+            }
+        }
+
+        Ok(true)
+    }
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -273,45 +310,13 @@ fn main() -> color_eyre::Result<()> {
 
         let c = buffer[0];
 
-        let should_exit = match state.current_mode {
-            Mode::Normal => !state
+        let should_exit = !match state.current_mode {
+            Mode::Normal => state
                 .handle_keypress_normal(c)
                 .wrap_err("Error while handling keypress [NORMAL]")?,
-            Mode::Insertion => {
-                let mut stdout_lock = stdout().lock();
-
-                if c == 27 {
-                    // ESC
-                    state.current_mode = Mode::Normal;
-
-                    if let Some(mut gap) = state.edited_line.take()
-                        && let Some(line) = state.get_current_line_mut()
-                    {
-                        line.reserve(gap.start.len() + gap.end.len());
-                        line.clear();
-                        line.extend(gap.start.drain(..));
-                        line.extend(gap.end.drain(..));
-                    }
-                } else if c == 127 {
-                    // BACKSPACE
-                    if state.cursor_pos.col != 0
-                        && let Some(gap) = &mut state.edited_line
-                        && gap.start.pop().is_some()
-                    {
-                        state.cursor_pos.col -= 1;
-                        term_write!(&mut stdout_lock, "\x1b[1D")?;
-                    }
-                } else if c.is_ascii_graphic() || c == b' ' {
-                    // TODO: check end of window
-                    if let Some(gap) = &mut state.edited_line {
-                        gap.start.push(c as char);
-                        state.cursor_pos.col += 1;
-                        term_write!(&mut stdout_lock, "\x1b[1C")?;
-                    }
-                }
-
-                false
-            }
+            Mode::Insertion => state
+                .handle_keypress_insertion(c)
+                .wrap_err("Error while handling keypress [INSERTION]")?,
         };
 
         if should_exit {
