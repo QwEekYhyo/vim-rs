@@ -14,7 +14,6 @@ use crate::logger::setup_logger;
 
 mod logger;
 
-#[allow(dead_code)]
 #[derive(Debug)]
 struct WindowSize {
     col: usize,
@@ -91,7 +90,6 @@ fn get_window_size() -> Option<WindowSize> {
 }
 
 impl State {
-    #[allow(dead_code)]
     fn get_current_line(&self) -> Option<&str> {
         self.text_lines
             .get(self.cursor_pos.row)
