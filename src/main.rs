@@ -198,7 +198,7 @@ impl State {
             b'i' => {
                 // This is kinda weird but whatever
                 self.edited_line = if let Some(line) = self.get_current_line()
-                    && self.cursor_pos.col < line.len()
+                    && self.cursor_pos.col <= line.len()
                 {
                     let mut gap_buffer = GapBuffer {
                         start: Vec::with_capacity(self.cursor_pos.col * 2),
@@ -305,7 +305,7 @@ fn main() -> color_eyre::Result<()> {
                         state.cursor_pos.col -= 1;
                         term_write!(&mut stdout_lock, "\x1b[1D")?;
                     }
-                } else {
+                } else if c.is_ascii_graphic() || c == b' ' {
                     // TODO: check end of window
                     if let Some(gap) = &mut state.edited_line {
                         gap.start.push(c as char);
