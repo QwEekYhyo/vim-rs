@@ -17,8 +17,8 @@ mod logger;
 #[allow(dead_code)]
 #[derive(Debug)]
 struct WindowSize {
-    col: u16,
-    row: u16,
+    col: usize,
+    row: usize,
 }
 
 #[derive(Debug)]
@@ -46,7 +46,7 @@ struct State {
     current_mode: Mode,
 }
 
-const STARTING_COL: u16 = 3;
+const STARTING_COL: usize = 3;
 
 impl Drop for State {
     fn drop(&mut self) {
@@ -80,8 +80,8 @@ fn get_window_size() -> Option<WindowSize> {
             let error = libc::ioctl(stream, TIOCGWINSZ, &raw mut window_size);
             if error == 0 {
                 return Some(WindowSize {
-                    col: window_size.ws_col,
-                    row: window_size.ws_row,
+                    col: window_size.ws_col as usize,
+                    row: window_size.ws_row as usize,
                 });
             }
         }
@@ -94,12 +94,12 @@ impl State {
     #[allow(dead_code)]
     fn get_current_line(&self) -> Option<&str> {
         self.text_lines
-            .get(self.cursor_pos.row as usize)
+            .get(self.cursor_pos.row)
             .map(|line| line.as_str())
     }
 
     fn get_current_line_mut(&mut self) -> Option<&mut String> {
-        self.text_lines.get_mut(self.cursor_pos.row as usize)
+        self.text_lines.get_mut(self.cursor_pos.row)
     }
 
     fn init_ui(&mut self) -> color_eyre::Result<()> {
@@ -137,7 +137,7 @@ impl State {
                         &mut lock,
                         "{}",
                         self.text_lines
-                            .get(n_line as usize)
+                            .get(n_line)
                             .map_or("", |line| line.as_str())
                     )?;
                 }
@@ -200,15 +200,15 @@ impl State {
             b'i' => {
                 // This is kinda weird but whatever
                 self.edited_line = if let Some(line) = self.get_current_line()
-                    && (self.cursor_pos.col as usize) < line.len()
+                    && self.cursor_pos.col < line.len()
                 {
                     let mut gap_buffer = GapBuffer {
-                        start: Vec::with_capacity(self.cursor_pos.col as usize * 2),
-                        end: line[self.cursor_pos.col as usize..].chars().collect(),
+                        start: Vec::with_capacity(self.cursor_pos.col * 2),
+                        end: line[self.cursor_pos.col..].chars().collect(),
                     };
                     gap_buffer
                         .start
-                        .extend(line[..self.cursor_pos.col as usize].chars());
+                        .extend(line[..self.cursor_pos.col].chars());
 
                     Some(gap_buffer)
                 } else {
