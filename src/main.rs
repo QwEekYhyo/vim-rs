@@ -136,9 +136,7 @@ impl State {
                     term_write!(
                         &mut lock,
                         "{}",
-                        self.text_lines
-                            .get(n_line)
-                            .map_or("", |line| line.as_str())
+                        self.text_lines.get(n_line).map_or("", |line| line.as_str())
                     )?;
                 }
             }
@@ -206,9 +204,7 @@ impl State {
                         start: Vec::with_capacity(self.cursor_pos.col * 2),
                         end: line[self.cursor_pos.col..].chars().collect(),
                     };
-                    gap_buffer
-                        .start
-                        .extend(line[..self.cursor_pos.col].chars());
+                    gap_buffer.start.extend(line[..self.cursor_pos.col].chars());
 
                     Some(gap_buffer)
                 } else {
@@ -293,20 +289,22 @@ fn main() -> color_eyre::Result<()> {
                     state.current_mode = Mode::Normal;
 
                     if let Some(mut gap) = state.edited_line.take()
-                        && let Some(line) = state.get_current_line_mut() {
-                            line.reserve(gap.start.len() + gap.end.len());
-                            line.clear();
-                            line.extend(gap.start.drain(..));
-                            line.extend(gap.end.drain(..));
-                        }
+                        && let Some(line) = state.get_current_line_mut()
+                    {
+                        line.reserve(gap.start.len() + gap.end.len());
+                        line.clear();
+                        line.extend(gap.start.drain(..));
+                        line.extend(gap.end.drain(..));
+                    }
                 } else if c == 127 {
                     // BACKSPACE
                     if state.cursor_pos.col != 0
                         && let Some(gap) = &mut state.edited_line
-                        && gap.start.pop().is_some() {
-                            state.cursor_pos.col -= 1;
-                            term_write!(&mut stdout_lock, "\x1b[1D")?;
-                        }
+                        && gap.start.pop().is_some()
+                    {
+                        state.cursor_pos.col -= 1;
+                        term_write!(&mut stdout_lock, "\x1b[1D")?;
+                    }
                 } else {
                     // TODO: check end of window
                     if let Some(gap) = &mut state.edited_line {
