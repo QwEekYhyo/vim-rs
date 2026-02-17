@@ -1,5 +1,4 @@
 use color_eyre::eyre::{Context, OptionExt};
-use log::debug;
 use std::io::{Read, Write};
 
 use cvt::cvt;
@@ -72,46 +71,58 @@ fn get_window_size() -> Option<WindowSize> {
     None
 }
 
-fn init_ui(state: &mut State) -> color_eyre::Result<()> {
-    let mut lock = state.stdout.lock();
-    // Enable alt buffer, move cursor to 0,0, move cursor right 2 columns
-    term_write!(&mut lock, "\x1b[?1049h\x1b[H\x1b[{STARTING_COL}C")?;
-
-    draw_ui(state)
-}
-
-fn draw_ui(state: &mut State) -> color_eyre::Result<()> {
-    let mut lock = state.stdout.lock();
-    // Save cursor pos, clear screen, move cursor to 0,0
-    term_write!(&mut lock, "\x1b7\x1b[2J\x1b[H")?;
-
-    for n_line in 0..state.window_size.row - 2 {
-        // Write ~ , go down 1 line, go left 2 columns
-        term_write!(
-            &mut lock,
-            "~  {}{}\x1b[K\x1b[0m\x1b[1E",
-            if n_line == state.cursor_pos.row {
-                "\x1b[48;2;54;58;79m"
-            } else {
-                ""
-            },
-            state
-                .text_lines
-                .get(n_line as usize)
-                .map_or("", |line| line.as_str())
-        )?;
+impl State {
+    #[allow(dead_code)]
+    fn get_current_line(&self) -> Option<&str> {
+        self.text_lines
+            .get(self.cursor_pos.row as usize)
+            .map(|line| line.as_str())
     }
 
-    // Set background color and erase it in line
-    term_write!(
-        &mut lock,
-        "\x1b[48;2;30;32;48m This is the overlay\x1b[K\x1b[0m",
-    )?;
+    fn get_current_line_mut(&mut self) -> Option<&mut String> {
+        self.text_lines.get_mut(self.cursor_pos.row as usize)
+    }
 
-    // Restore saved cursor pos + set blinking mode
-    term_write!(&mut lock, "\x1b8\x1b[25m")?;
+    fn init_ui(&mut self) -> color_eyre::Result<()> {
+        let mut lock = self.stdout.lock();
+        // Enable alt buffer, move cursor to 0,0, move cursor right 2 columns
+        term_write!(&mut lock, "\x1b[?1049h\x1b[H\x1b[{STARTING_COL}C")?;
 
-    flush(&mut lock)
+        self.draw_ui()
+    }
+
+    fn draw_ui(&mut self) -> color_eyre::Result<()> {
+        let mut lock = self.stdout.lock();
+        // Save cursor pos, clear screen, move cursor to 0,0
+        term_write!(&mut lock, "\x1b7\x1b[2J\x1b[H")?;
+
+        for n_line in 0..self.window_size.row - 2 {
+            // Write ~ , go down 1 line, go left 2 columns
+            term_write!(
+                &mut lock,
+                "~  {}{}\x1b[K\x1b[0m\x1b[1E",
+                if n_line == self.cursor_pos.row {
+                    "\x1b[48;2;54;58;79m"
+                } else {
+                    ""
+                },
+                self.text_lines
+                    .get(n_line as usize)
+                    .map_or("", |line| line.as_str())
+            )?;
+        }
+
+        // Set background color and erase it in line
+        term_write!(
+            &mut lock,
+            "\x1b[48;2;30;32;48m This is the overlay\x1b[K\x1b[0m",
+        )?;
+
+        // Restore saved cursor pos + set blinking mode
+        term_write!(&mut lock, "\x1b8\x1b[25m")?;
+
+        flush(&mut lock)
+    }
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -154,7 +165,7 @@ fn main() -> color_eyre::Result<()> {
 
     let mut buffer = [0u8; 1];
 
-    init_ui(&mut state).wrap_err("Failed to initialize UI")?;
+    state.init_ui().wrap_err("Failed to initialize UI")?;
 
     let mut stdin_lock = std::io::stdin().lock();
     loop {
@@ -194,6 +205,11 @@ fn main() -> color_eyre::Result<()> {
                 state.cursor_pos.col += 1;
                 term_write!(&mut stdout_lock, "\x1b[1C")?;
             }
+            b'd' => {
+                if let Some(line) = state.get_current_line_mut() {
+                    line.clear();
+                }
+            }
             b'q' => {
                 break;
             }
@@ -201,7 +217,7 @@ fn main() -> color_eyre::Result<()> {
             _ => {}
         }
 
-        draw_ui(&mut state).wrap_err("Failed to draw UI")?;
+        state.draw_ui().wrap_err("Failed to draw UI")?;
     }
 
     Ok(())
