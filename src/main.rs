@@ -39,6 +39,7 @@ struct State {
     current_io_settings: libc::termios,
     window_size: WindowSize,
     cursor_pos: WindowSize,
+    target_col: usize,
     text_lines: Vec<String>,
     edited_line: Option<GapBuffer>,
     current_mode: Mode,
@@ -101,16 +102,16 @@ impl State {
 
     fn init_ui(&mut self) -> color_eyre::Result<()> {
         let mut lock = stdout().lock();
-        // Enable alt buffer, move cursor to 0,0, move cursor right STARTING_COL columns
-        term_write!(&mut lock, "\x1b[?1049h\x1b[H\x1b[{STARTING_COL}C")?;
+        // Enable alt buffer
+        term_write!(&mut lock, "\x1b[?1049h")?;
 
         self.draw_ui()
     }
 
     fn draw_ui(&mut self) -> color_eyre::Result<()> {
         let mut lock = stdout().lock();
-        // Save cursor pos, clear screen, move cursor to 0,0
-        term_write!(&mut lock, "\x1b7\x1b[2J\x1b[H")?;
+        // Clear screen, move cursor to 0,0
+        term_write!(&mut lock, "\x1b[2J\x1b[H")?;
 
         for n_line in 0..self.window_size.row - 2 {
             term_write!(&mut lock, "~  ")?;
@@ -148,44 +149,70 @@ impl State {
             "\x1b[48;2;30;32;48m This is the overlay\x1b[K\x1b[0m",
         )?;
 
-        // Restore saved cursor pos + set blinking mode
-        term_write!(&mut lock, "\x1b8\x1b[25m")?;
+        // Move cursor to its position, set blinking mode
+        // NB: apparently the escape code used to position the cursor
+        // is 1 indexed so we need to add 1
+        term_write!(
+            &mut lock,
+            "\x1b[{};{}H\x1b[25m",
+            self.cursor_pos.row + 1,
+            self.cursor_pos.col + STARTING_COL + 1
+        )?;
 
         flush(&mut lock)
     }
 
+    // Maybe we don't need Result anymore as nothing returns an error
     /// Returns true if the program should continue
     fn handle_keypress_normal(&mut self, c: u8) -> color_eyre::Result<bool> {
-        let mut stdout_lock = stdout().lock();
-
         match c {
             b'h' => {
                 if self.cursor_pos.col == 0 {
                     return Ok(true);
                 }
                 self.cursor_pos.col -= 1;
-                term_write!(&mut stdout_lock, "\x1b[1D")?;
+                self.target_col = self.cursor_pos.col;
+            }
+            b'l' => {
+                if let Some(line) = self.get_current_line()
+                    && self.cursor_pos.col >= line.len()
+                {
+                    return Ok(true);
+                }
+                self.cursor_pos.col += 1;
+                self.target_col = self.cursor_pos.col;
             }
             b'j' => {
                 if self.cursor_pos.row >= self.window_size.row - 3 {
                     return Ok(true);
                 }
                 self.cursor_pos.row += 1;
-                term_write!(&mut stdout_lock, "\x1b[1B")?;
+                // TODO: extract this as function?
+                if let Some(line) = self.get_current_line() {
+                    self.cursor_pos.col = if self.target_col > line.len() {
+                        line.len()
+                    } else {
+                        self.target_col
+                    }
+                } else {
+                    self.cursor_pos.col = 0;
+                }
             }
             b'k' => {
                 if self.cursor_pos.row == 0 {
                     return Ok(true);
                 }
                 self.cursor_pos.row -= 1;
-                term_write!(&mut stdout_lock, "\x1b[1A")?;
-            }
-            b'l' => {
-                if self.cursor_pos.col >= self.window_size.col - 1 - STARTING_COL {
-                    return Ok(true);
+                // TODO: extract this as function?
+                if let Some(line) = self.get_current_line() {
+                    self.cursor_pos.col = if self.target_col > line.len() {
+                        line.len()
+                    } else {
+                        self.target_col
+                    }
+                } else {
+                    self.cursor_pos.col = 0;
                 }
-                self.cursor_pos.col += 1;
-                term_write!(&mut stdout_lock, "\x1b[1C")?;
             }
             b'd' => {
                 if let Some(line) = self.get_current_line_mut() {
@@ -275,6 +302,7 @@ fn main() -> color_eyre::Result<()> {
         current_io_settings: termios,
         window_size: get_window_size().ok_or_eyre("Could not get window size")?,
         cursor_pos: WindowSize { col: 0, row: 0 },
+        target_col: 0,
         text_lines: vec![
             "#include <stdio.h>".to_string(),
             "".to_string(),
