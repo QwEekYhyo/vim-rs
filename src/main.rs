@@ -1,5 +1,9 @@
 use color_eyre::eyre::{Context, OptionExt};
-use std::io::{Read, Write};
+use log::debug;
+use std::{
+    collections::VecDeque,
+    io::{Read, Write},
+};
 
 use cvt::cvt;
 use libc::{
@@ -18,6 +22,19 @@ struct WindowSize {
 }
 
 #[derive(Debug)]
+struct GapBuffer {
+    // sort of
+    start: Vec<char>,
+    end: VecDeque<char>,
+}
+
+#[derive(Debug)]
+enum Mode {
+    Normal,
+    Insertion,
+}
+
+#[derive(Debug)]
 struct State {
     previous_io_settings: libc::termios,
     current_io_settings: libc::termios,
@@ -25,6 +42,8 @@ struct State {
     window_size: WindowSize,
     cursor_pos: WindowSize,
     text_lines: Vec<String>,
+    edited_line: Option<GapBuffer>,
+    current_mode: Mode,
 }
 
 const STARTING_COL: u16 = 3;
@@ -85,7 +104,7 @@ impl State {
 
     fn init_ui(&mut self) -> color_eyre::Result<()> {
         let mut lock = self.stdout.lock();
-        // Enable alt buffer, move cursor to 0,0, move cursor right 2 columns
+        // Enable alt buffer, move cursor to 0,0, move cursor right STARTING_COL columns
         term_write!(&mut lock, "\x1b[?1049h\x1b[H\x1b[{STARTING_COL}C")?;
 
         self.draw_ui()
@@ -97,19 +116,35 @@ impl State {
         term_write!(&mut lock, "\x1b7\x1b[2J\x1b[H")?;
 
         for n_line in 0..self.window_size.row - 2 {
-            // Write ~ , go down 1 line, go left 2 columns
-            term_write!(
-                &mut lock,
-                "~  {}{}\x1b[K\x1b[0m\x1b[1E",
-                if n_line == self.cursor_pos.row {
-                    "\x1b[48;2;54;58;79m"
-                } else {
-                    ""
-                },
-                self.text_lines
-                    .get(n_line as usize)
-                    .map_or("", |line| line.as_str())
-            )?;
+            term_write!(&mut lock, "~  ")?;
+
+            let is_cursor_line = n_line == self.cursor_pos.row;
+            let is_insertion = matches!(self.current_mode, Mode::Insertion);
+
+            if is_cursor_line {
+                // Set highlight color
+                term_write!(&mut lock, "\x1b[48;2;54;58;79m")?;
+            }
+
+            match (is_cursor_line, is_insertion, &self.edited_line) {
+                (true, true, Some(gap)) => {
+                    for c in gap.start.iter().chain(&gap.end) {
+                        term_write!(&mut lock, "{c}")?;
+                    }
+                }
+                _ => {
+                    term_write!(
+                        &mut lock,
+                        "{}",
+                        self.text_lines
+                            .get(n_line as usize)
+                            .map_or("", |line| line.as_str())
+                    )?;
+                }
+            }
+
+            // Erase in line, reset all modes, move cursor to beginning of next line
+            term_write!(&mut lock, "\x1b[K\x1b[0m\x1b[1E")?;
         }
 
         // Set background color and erase it in line
@@ -122,6 +157,78 @@ impl State {
         term_write!(&mut lock, "\x1b8\x1b[25m")?;
 
         flush(&mut lock)
+    }
+
+    /// Returns true if the program should continue
+    fn handle_keypress_normal(&mut self, c: u8) -> color_eyre::Result<bool> {
+        let mut stdout_lock = self.stdout.lock();
+
+        match c {
+            b'h' => {
+                if self.cursor_pos.col == 0 {
+                    return Ok(true);
+                }
+                self.cursor_pos.col -= 1;
+                term_write!(&mut stdout_lock, "\x1b[1D")?;
+            }
+            b'j' => {
+                if self.cursor_pos.row >= self.window_size.row - 3 {
+                    return Ok(true);
+                }
+                self.cursor_pos.row += 1;
+                term_write!(&mut stdout_lock, "\x1b[1B")?;
+            }
+            b'k' => {
+                if self.cursor_pos.row == 0 {
+                    return Ok(true);
+                }
+                self.cursor_pos.row -= 1;
+                term_write!(&mut stdout_lock, "\x1b[1A")?;
+            }
+            b'l' => {
+                if self.cursor_pos.col >= self.window_size.col - 1 - STARTING_COL {
+                    return Ok(true);
+                }
+                self.cursor_pos.col += 1;
+                term_write!(&mut stdout_lock, "\x1b[1C")?;
+            }
+            b'd' => {
+                if let Some(line) = self.get_current_line_mut() {
+                    line.clear();
+                }
+            }
+            b'i' => {
+                // This is kinda weird but whatever
+                self.edited_line = if let Some(line) = self.get_current_line()
+                    && (self.cursor_pos.col as usize) < line.len()
+                {
+                    let mut gap_buffer = GapBuffer {
+                        start: Vec::with_capacity(self.cursor_pos.col as usize * 2),
+                        end: line[self.cursor_pos.col as usize..].chars().collect(),
+                    };
+                    gap_buffer
+                        .start
+                        .extend(line[..self.cursor_pos.col as usize].chars());
+
+                    Some(gap_buffer)
+                } else {
+                    None
+                };
+
+                if self.edited_line.is_some() {
+                    self.current_mode = Mode::Insertion;
+                }
+            }
+            b'q' => {
+                return Ok(false);
+            }
+
+            _ => {
+                debug!("{c}");
+            }
+        }
+
+        Ok(true)
     }
 }
 
@@ -138,10 +245,7 @@ fn main() -> color_eyre::Result<()> {
         current_io_settings: termios,
         stdout: std::io::stdout(),
         window_size: get_window_size().ok_or_eyre("Could not get window size")?,
-        cursor_pos: WindowSize {
-            col: STARTING_COL,
-            row: 0,
-        },
+        cursor_pos: WindowSize { col: 0, row: 0 },
         text_lines: vec![
             "#include <stdio.h>".to_string(),
             "".to_string(),
@@ -149,6 +253,8 @@ fn main() -> color_eyre::Result<()> {
             "    return 0;".to_string(),
             "}".to_string(),
         ],
+        edited_line: None,
+        current_mode: Mode::Normal,
     };
 
     // TODO: use cfmakeraw instead
@@ -173,48 +279,49 @@ fn main() -> color_eyre::Result<()> {
             .read_exact(&mut buffer)
             .wrap_err("Could not read character from standard input")?;
 
-        let mut stdout_lock = state.stdout.lock();
-
         let c = buffer[0];
-        match c {
-            b'h' => {
-                if state.cursor_pos.col <= STARTING_COL {
-                    continue;
-                }
-                state.cursor_pos.col -= 1;
-                term_write!(&mut stdout_lock, "\x1b[1D")?;
-            }
-            b'j' => {
-                if state.cursor_pos.row >= state.window_size.row - 3 {
-                    continue;
-                }
-                state.cursor_pos.row += 1;
-                term_write!(&mut stdout_lock, "\x1b[1B")?;
-            }
-            b'k' => {
-                if state.cursor_pos.row == 0 {
-                    continue;
-                }
-                state.cursor_pos.row -= 1;
-                term_write!(&mut stdout_lock, "\x1b[1A")?;
-            }
-            b'l' => {
-                if state.cursor_pos.col >= state.window_size.col - 1 {
-                    continue;
-                }
-                state.cursor_pos.col += 1;
-                term_write!(&mut stdout_lock, "\x1b[1C")?;
-            }
-            b'd' => {
-                if let Some(line) = state.get_current_line_mut() {
-                    line.clear();
-                }
-            }
-            b'q' => {
-                break;
-            }
 
-            _ => {}
+        let should_exit = match state.current_mode {
+            Mode::Normal => !state
+                .handle_keypress_normal(c)
+                .wrap_err("Error while handling keypress [NORMAL]")?,
+            Mode::Insertion => {
+                let mut stdout_lock = state.stdout.lock();
+
+                if c == 27 {
+                    // ESC
+                    state.current_mode = Mode::Normal;
+
+                    if let Some(mut gap) = state.edited_line.take()
+                        && let Some(line) = state.get_current_line_mut() {
+                            line.reserve(gap.start.len() + gap.end.len());
+                            line.clear();
+                            line.extend(gap.start.drain(..));
+                            line.extend(gap.end.drain(..));
+                        }
+                } else if c == 127 {
+                    // BACKSPACE
+                    if state.cursor_pos.col != 0
+                        && let Some(gap) = &mut state.edited_line
+                        && gap.start.pop().is_some() {
+                            state.cursor_pos.col -= 1;
+                            term_write!(&mut stdout_lock, "\x1b[1D")?;
+                        }
+                } else {
+                    // TODO: check end of window
+                    if let Some(gap) = &mut state.edited_line {
+                        gap.start.push(c as char);
+                        state.cursor_pos.col += 1;
+                        term_write!(&mut stdout_lock, "\x1b[1C")?;
+                    }
+                }
+
+                false
+            }
+        };
+
+        if should_exit {
+            break;
         }
 
         state.draw_ui().wrap_err("Failed to draw UI")?;
