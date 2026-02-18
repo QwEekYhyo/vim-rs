@@ -162,6 +162,11 @@ impl State {
         flush(&mut lock)
     }
 
+    fn clamp_col_to_current_line(&mut self) {
+        let len = self.get_current_line().map_or(0, |l| l.len());
+        self.cursor_pos.col = self.target_col.min(len);
+    }
+
     // Maybe we don't need Result anymore as nothing returns an error
     /// Returns true if the program should continue
     fn handle_keypress_normal(&mut self, c: u8) -> color_eyre::Result<bool> {
@@ -187,26 +192,14 @@ impl State {
                     return Ok(true);
                 }
                 self.cursor_pos.row += 1;
-                // TODO: extract this as function?
-                // no because borrow checker
-                self.cursor_pos.col = if let Some(line) = self.get_current_line() {
-                    self.target_col.min(line.len())
-                } else {
-                    0
-                }
+                self.clamp_col_to_current_line();
             }
             b'k' => {
                 if self.cursor_pos.row == 0 {
                     return Ok(true);
                 }
                 self.cursor_pos.row -= 1;
-                // TODO: extract this as function?
-                // no because borrow checker
-                self.cursor_pos.col = if let Some(line) = self.get_current_line() {
-                    self.target_col.min(line.len())
-                } else {
-                    0
-                }
+                self.clamp_col_to_current_line();
             }
             b'd' => {
                 if let Some(line) = self.get_current_line_mut() {
@@ -215,11 +208,7 @@ impl State {
                     lines_below.rotate_left(1);
 
                     // This is not how Vim does it but whatever for now
-                    self.cursor_pos.col = if let Some(line) = self.get_current_line() {
-                        self.target_col.min(line.len())
-                    } else {
-                        0
-                    }
+                    self.clamp_col_to_current_line();
                 }
             }
             b'i' => {
