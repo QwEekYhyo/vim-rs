@@ -21,8 +21,7 @@ struct WindowSize {
 }
 
 #[derive(Debug)]
-struct GapBuffer {
-    // sort of
+struct SplitBuffer {
     start: Vec<char>,
     end: VecDeque<char>,
 }
@@ -30,7 +29,7 @@ struct GapBuffer {
 #[derive(Debug)]
 enum Mode {
     Normal,
-    Insertion,
+    Insertion { buffer: SplitBuffer },
 }
 
 #[derive(Debug)]
@@ -41,7 +40,6 @@ struct State {
     cursor_pos: WindowSize,
     target_col: usize,
     text_lines: Vec<String>,
-    edited_line: Option<GapBuffer>,
     current_mode: Mode,
 }
 
@@ -117,26 +115,22 @@ impl State {
             term_write!(&mut lock, "~  ")?;
 
             let is_cursor_line = n_line == self.cursor_pos.row;
-            let is_insertion = matches!(self.current_mode, Mode::Insertion);
 
             if is_cursor_line {
                 // Set highlight color
                 term_write!(&mut lock, "\x1b[48;2;54;58;79m")?;
             }
 
-            match (is_cursor_line, is_insertion, &self.edited_line) {
-                (true, true, Some(gap)) => {
-                    for c in gap.start.iter().chain(&gap.end) {
-                        term_write!(&mut lock, "{c}")?;
-                    }
+            if is_cursor_line && let Mode::Insertion { buffer } = &self.current_mode {
+                for c in buffer.start.iter().chain(&buffer.end) {
+                    term_write!(&mut lock, "{c}")?;
                 }
-                _ => {
-                    term_write!(
-                        &mut lock,
-                        "{}",
-                        self.text_lines.get(n_line).map_or("", |line| line.as_str())
-                    )?;
-                }
+            } else {
+                term_write!(
+                    &mut lock,
+                    "{}",
+                    self.text_lines.get(n_line).map_or("", |line| line.as_str())
+                )?;
             }
 
             // Erase in line, reset all modes, move cursor to beginning of next line
@@ -212,23 +206,20 @@ impl State {
                 }
             }
             b'i' => {
-                // This is kinda weird but whatever
-                self.edited_line = if let Some(line) = self.get_current_line()
+                if let Some(line) = self.get_current_line()
                     && self.cursor_pos.col <= line.len()
                 {
-                    let mut gap_buffer = GapBuffer {
+                    let mut split_buffer = SplitBuffer {
                         start: Vec::with_capacity(self.cursor_pos.col * 2),
                         end: line[self.cursor_pos.col..].chars().collect(),
                     };
-                    gap_buffer.start.extend(line[..self.cursor_pos.col].chars());
+                    split_buffer
+                        .start
+                        .extend(line[..self.cursor_pos.col].chars());
 
-                    Some(gap_buffer)
-                } else {
-                    None
-                };
-
-                if self.edited_line.is_some() {
-                    self.current_mode = Mode::Insertion;
+                    self.current_mode = Mode::Insertion {
+                        buffer: split_buffer,
+                    };
                 }
             }
             b'q' => {
@@ -244,39 +235,39 @@ impl State {
     }
 
     /// Returns true if the program should continue
-    fn handle_keypress_insertion(&mut self, c: u8) -> color_eyre::Result<bool> {
+    fn handle_keypress_insertion(
+        &mut self,
+        c: u8,
+        mut buffer: SplitBuffer,
+    ) -> color_eyre::Result<bool> {
         let mut stdout_lock = stdout().lock();
 
         if c == 27 {
             // ESC
             self.current_mode = Mode::Normal;
 
-            if let Some(mut gap) = self.edited_line.take()
-                && let Some(line) = self.get_current_line_mut()
-            {
-                line.reserve(gap.start.len() + gap.end.len());
+            if let Some(line) = self.get_current_line_mut() {
+                line.reserve(buffer.start.len() + buffer.end.len());
                 line.clear();
-                line.extend(gap.start.drain(..));
-                line.extend(gap.end.drain(..));
+                line.extend(buffer.start.drain(..));
+                line.extend(buffer.end.drain(..));
             }
+
+            return Ok(true);
         } else if c == 127 {
             // BACKSPACE
-            if self.cursor_pos.col != 0
-                && let Some(gap) = &mut self.edited_line
-                && gap.start.pop().is_some()
-            {
+            if self.cursor_pos.col != 0 && buffer.start.pop().is_some() {
                 self.cursor_pos.col -= 1;
                 term_write!(&mut stdout_lock, "\x1b[1D")?;
             }
         } else if c.is_ascii_graphic() || c == b' ' {
             // TODO: check end of window
-            if let Some(gap) = &mut self.edited_line {
-                gap.start.push(c as char);
-                self.cursor_pos.col += 1;
-                term_write!(&mut stdout_lock, "\x1b[1C")?;
-            }
+            buffer.start.push(c as char);
+            self.cursor_pos.col += 1;
+            term_write!(&mut stdout_lock, "\x1b[1C")?;
         }
 
+        self.current_mode = Mode::Insertion { buffer };
         Ok(true)
     }
 }
@@ -302,7 +293,6 @@ fn main() -> color_eyre::Result<()> {
             "    return 0;".to_string(),
             "}".to_string(),
         ],
-        edited_line: None,
         current_mode: Mode::Normal,
     };
 
@@ -330,12 +320,14 @@ fn main() -> color_eyre::Result<()> {
 
         let c = buffer[0];
 
-        let should_exit = !match state.current_mode {
+        let current_mode = std::mem::replace(&mut state.current_mode, Mode::Normal);
+
+        let should_exit = !match current_mode {
             Mode::Normal => state
                 .handle_keypress_normal(c)
                 .wrap_err("Error while handling keypress [NORMAL]")?,
-            Mode::Insertion => state
-                .handle_keypress_insertion(c)
+            Mode::Insertion { buffer } => state
+                .handle_keypress_insertion(c, buffer)
                 .wrap_err("Error while handling keypress [INSERTION]")?,
         };
 
