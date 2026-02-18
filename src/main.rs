@@ -188,14 +188,11 @@ impl State {
                 }
                 self.cursor_pos.row += 1;
                 // TODO: extract this as function?
-                if let Some(line) = self.get_current_line() {
-                    self.cursor_pos.col = if self.target_col > line.len() {
-                        line.len()
-                    } else {
-                        self.target_col
-                    }
+                // no because borrow checker
+                self.cursor_pos.col = if let Some(line) = self.get_current_line() {
+                    self.target_col.min(line.len())
                 } else {
-                    self.cursor_pos.col = 0;
+                    0
                 }
             }
             b'k' => {
@@ -204,19 +201,25 @@ impl State {
                 }
                 self.cursor_pos.row -= 1;
                 // TODO: extract this as function?
-                if let Some(line) = self.get_current_line() {
-                    self.cursor_pos.col = if self.target_col > line.len() {
-                        line.len()
-                    } else {
-                        self.target_col
-                    }
+                // no because borrow checker
+                self.cursor_pos.col = if let Some(line) = self.get_current_line() {
+                    self.target_col.min(line.len())
                 } else {
-                    self.cursor_pos.col = 0;
+                    0
                 }
             }
             b'd' => {
                 if let Some(line) = self.get_current_line_mut() {
                     line.clear();
+                    let lines_below = &mut self.text_lines[self.cursor_pos.row..];
+                    lines_below.rotate_left(1);
+
+                    // This is not how Vim does it but whatever for now
+                    self.cursor_pos.col = if let Some(line) = self.get_current_line() {
+                        self.target_col.min(line.len())
+                    } else {
+                        0
+                    }
                 }
             }
             b'i' => {
