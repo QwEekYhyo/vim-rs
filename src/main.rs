@@ -231,13 +231,17 @@ impl State {
                 self.enable_insertion_mode();
             }
             b'o' => {
-                if self.cursor_pos.row == self.text_lines.len() - 1 {
+                self.cursor_pos.row += 1;
+                if self.cursor_pos.row == self.text_lines.len() {
                     // This should not allocate yet so this is good
                     self.text_lines.push(String::new());
-                    self.cursor_pos.col = 0;
-                    self.cursor_pos.row += 1;
-                    self.enable_insertion_mode();
+                } else {
+                    // Just else because it is assumed the cursor cannot be out of bounds
+                    // This assumption is only true if I know how to code correctly
+                    self.text_lines.insert(self.cursor_pos.row, String::new());
                 }
+                self.cursor_pos.col = 0;
+                self.enable_insertion_mode();
             }
             b'q' => {
                 return Ok(false);
