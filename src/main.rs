@@ -161,6 +161,26 @@ impl State {
         self.cursor_pos.col = self.target_col.min(len);
     }
 
+    fn enable_insertion_mode(&mut self) {
+        if let Some(line) = self.get_current_line()
+            && self.cursor_pos.col <= line.len()
+        {
+            let mut split_buffer = SplitBuffer {
+                // Those are completely arbitrary values
+                // This may need more extensive testing to find better ones
+                start: Vec::with_capacity(30.max(self.cursor_pos.col * 3).max(line.len() * 2)),
+                end: line[self.cursor_pos.col..].chars().collect(),
+            };
+            split_buffer
+                .start
+                .extend(line[..self.cursor_pos.col].chars());
+
+            self.current_mode = Mode::Insertion {
+                buffer: split_buffer,
+            };
+        }
+    }
+
     // Maybe we don't need Result anymore as nothing returns an error
     /// Returns true if the program should continue
     fn handle_keypress_normal(&mut self, c: u8) -> color_eyre::Result<bool> {
@@ -182,7 +202,9 @@ impl State {
                 self.target_col = self.cursor_pos.col;
             }
             b'j' => {
-                if self.cursor_pos.row >= self.window_size.row - 3 {
+                if self.cursor_pos.row >= self.window_size.row - 3
+                    || self.cursor_pos.row >= self.text_lines.len() - 1
+                {
                     return Ok(true);
                 }
                 self.cursor_pos.row += 1;
@@ -206,20 +228,15 @@ impl State {
                 }
             }
             b'i' => {
-                if let Some(line) = self.get_current_line()
-                    && self.cursor_pos.col <= line.len()
-                {
-                    let mut split_buffer = SplitBuffer {
-                        start: Vec::with_capacity(self.cursor_pos.col * 2),
-                        end: line[self.cursor_pos.col..].chars().collect(),
-                    };
-                    split_buffer
-                        .start
-                        .extend(line[..self.cursor_pos.col].chars());
-
-                    self.current_mode = Mode::Insertion {
-                        buffer: split_buffer,
-                    };
+                self.enable_insertion_mode();
+            }
+            b'o' => {
+                if self.cursor_pos.row == self.text_lines.len() - 1 {
+                    // This should not allocate yet so this is good
+                    self.text_lines.push(String::new());
+                    self.cursor_pos.col = 0;
+                    self.cursor_pos.row += 1;
+                    self.enable_insertion_mode();
                 }
             }
             b'q' => {
@@ -245,6 +262,7 @@ impl State {
         if c == 27 {
             // ESC
             self.current_mode = Mode::Normal;
+            self.target_col = self.cursor_pos.col;
 
             if let Some(line) = self.get_current_line_mut() {
                 line.reserve(buffer.start.len() + buffer.end.len());
