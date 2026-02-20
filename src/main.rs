@@ -4,14 +4,16 @@ use std::{
     collections::VecDeque,
     io::{Read, Write, stdout},
 };
+use unicode_width::UnicodeWidthChar;
 
 use cvt::cvt;
 use libc::{
     ECHO, ICANON, ISIG, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO, TCSAFLUSH, TCSANOW, TIOCGWINSZ,
 };
 
-use crate::logger::setup_logger;
+use crate::{line::Line, logger::setup_logger};
 
+mod line;
 mod logger;
 
 #[derive(Debug)]
@@ -39,7 +41,7 @@ struct State {
     window_size: WindowSize,
     cursor_pos: WindowSize,
     target_col: usize,
-    text_lines: Vec<String>,
+    text_lines: Vec<Line>,
     current_mode: Mode,
 }
 
@@ -88,13 +90,11 @@ fn get_window_size() -> Option<WindowSize> {
 }
 
 impl State {
-    fn get_current_line(&self) -> Option<&str> {
-        self.text_lines
-            .get(self.cursor_pos.row)
-            .map(|line| line.as_str())
+    fn get_current_line(&self) -> Option<&Line> {
+        self.text_lines.get(self.cursor_pos.row)
     }
 
-    fn get_current_line_mut(&mut self) -> Option<&mut String> {
+    fn get_current_line_mut(&mut self) -> Option<&mut Line> {
         self.text_lines.get_mut(self.cursor_pos.row)
     }
 
@@ -143,6 +143,14 @@ impl State {
             "\x1b[48;2;30;32;48m This is the overlay\x1b[K\x1b[0m",
         )?;
 
+        let columns = if let Mode::Insertion { buffer } = &self.current_mode {
+            buffer.start.iter().map(|&c| UnicodeWidthChar::width(c).unwrap_or(0)).sum()
+        } else if let Some(line) = self.get_current_line() {
+            line.get_unicode_width_at(self.cursor_pos.col)
+        } else {
+            self.cursor_pos.col
+        };
+
         // Move cursor to its position, set blinking mode
         // NB: apparently the escape code used to position the cursor
         // is 1 indexed so we need to add 1
@@ -150,7 +158,7 @@ impl State {
             &mut lock,
             "\x1b[{};{}H\x1b[25m",
             self.cursor_pos.row + 1,
-            self.cursor_pos.col + STARTING_COL + 1
+            columns + STARTING_COL + 1
         )?;
 
         flush(&mut lock)
@@ -169,11 +177,11 @@ impl State {
                 // Those are completely arbitrary values
                 // This may need more extensive testing to find better ones
                 start: Vec::with_capacity(30.max(self.cursor_pos.col * 3).max(line.len() * 2)),
-                end: line[self.cursor_pos.col..].chars().collect(),
+                end: line.chars().skip(self.cursor_pos.col).collect(),
             };
             split_buffer
                 .start
-                .extend(line[..self.cursor_pos.col].chars());
+                .extend(line.chars().take(self.cursor_pos.col));
 
             self.current_mode = Mode::Insertion {
                 buffer: split_buffer,
@@ -234,11 +242,11 @@ impl State {
                 self.cursor_pos.row += 1;
                 if self.cursor_pos.row == self.text_lines.len() {
                     // This should not allocate yet so this is good
-                    self.text_lines.push(String::new());
+                    self.text_lines.push(Line::new());
                 } else {
                     // Just else because it is assumed the cursor cannot be out of bounds
                     // This assumption is only true if I know how to code correctly
-                    self.text_lines.insert(self.cursor_pos.row, String::new());
+                    self.text_lines.insert(self.cursor_pos.row, Line::new());
                 }
                 self.cursor_pos.col = 0;
                 self.enable_insertion_mode();
@@ -309,11 +317,12 @@ fn main() -> color_eyre::Result<()> {
         cursor_pos: WindowSize { col: 0, row: 0 },
         target_col: 0,
         text_lines: vec![
-            "#include <stdio.h>".to_string(),
-            "".to_string(),
-            "int main(void) {".to_string(),
-            "    return 0;".to_string(),
-            "}".to_string(),
+            Line::with_string("#include <stdio.h>".to_string()),
+            Line::with_string("".to_string()),
+            Line::with_string("int main(void) {".to_string()),
+            Line::with_string("    printf(\"%s\\n\", \"🍆\");".to_string()),
+            Line::with_string("    return 0;".to_string()),
+            Line::with_string("}".to_string()),
         ],
         current_mode: Mode::Normal,
     };
