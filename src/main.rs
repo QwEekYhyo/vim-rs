@@ -269,8 +269,7 @@ impl State {
         c: u8,
         mut buffer: SplitBuffer,
     ) -> color_eyre::Result<bool> {
-        let mut stdout_lock = stdout().lock();
-
+        // Pressing arrow keys is like 3 inputs, first one being esc
         if c == 27 {
             // ESC
             self.current_mode = Mode::Normal;
@@ -288,13 +287,11 @@ impl State {
             // BACKSPACE
             if self.cursor_pos.col != 0 && buffer.start.pop().is_some() {
                 self.cursor_pos.col -= 1;
-                term_write!(&mut stdout_lock, "\x1b[1D")?;
             }
         } else if c.is_ascii_graphic() || c == b' ' {
             // TODO: check end of window
             buffer.start.push(c as char);
             self.cursor_pos.col += 1;
-            term_write!(&mut stdout_lock, "\x1b[1C")?;
         }
 
         self.current_mode = Mode::Insertion { buffer };
