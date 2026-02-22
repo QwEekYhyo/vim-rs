@@ -32,6 +32,7 @@ struct SplitBuffer {
 enum Mode {
     Normal,
     Insertion { buffer: SplitBuffer },
+    Command,
 }
 
 #[derive(Debug)]
@@ -43,6 +44,7 @@ struct State {
     target_col: usize,
     text_lines: Vec<Line>,
     current_mode: Mode,
+    command_buf: String,
 }
 
 const STARTING_COL: usize = 3;
@@ -143,23 +145,38 @@ impl State {
             "\x1b[48;2;30;32;48m This is the overlay\x1b[K\x1b[0m",
         )?;
 
-        let columns = if let Mode::Insertion { buffer } = &self.current_mode {
-            buffer.start.iter().map(|&c| UnicodeWidthChar::width(c).unwrap_or(0)).sum()
-        } else if let Some(line) = self.get_current_line() {
-            line.get_unicode_width_at(self.cursor_pos.col)
+        if matches!(self.current_mode, Mode::Command) {
+            // Move cursor to input position, write current input, set blinking mode
+            term_write!(
+                &mut lock,
+                "\x1b[{};{}H:{}\x1b[25m",
+                self.window_size.row,
+                1,
+                self.command_buf
+            )?;
         } else {
-            self.cursor_pos.col
-        };
+            let columns = if let Mode::Insertion { buffer } = &self.current_mode {
+                buffer
+                    .start
+                    .iter()
+                    .map(|&c| UnicodeWidthChar::width(c).unwrap_or(0))
+                    .sum()
+            } else if let Some(line) = self.get_current_line() {
+                line.get_unicode_width_at(self.cursor_pos.col)
+            } else {
+                self.cursor_pos.col
+            };
 
-        // Move cursor to its position, set blinking mode
-        // NB: apparently the escape code used to position the cursor
-        // is 1 indexed so we need to add 1
-        term_write!(
-            &mut lock,
-            "\x1b[{};{}H\x1b[25m",
-            self.cursor_pos.row + 1,
-            columns + STARTING_COL + 1
-        )?;
+            // Move cursor to its position, set blinking mode
+            // NB: apparently the escape code used to position the cursor
+            // is 1 indexed so we need to add 1
+            term_write!(
+                &mut lock,
+                "\x1b[{};{}H\x1b[25m",
+                self.cursor_pos.row + 1,
+                columns + STARTING_COL + 1
+            )?;
+        }
 
         flush(&mut lock)
     }
@@ -251,6 +268,9 @@ impl State {
                 self.cursor_pos.col = 0;
                 self.enable_insertion_mode();
             }
+            b':' => {
+                self.current_mode = Mode::Command;
+            }
             b'q' => {
                 return Ok(false);
             }
@@ -297,6 +317,30 @@ impl State {
         self.current_mode = Mode::Insertion { buffer };
         Ok(true)
     }
+
+    /// Returns true if the program should continue
+    fn handle_keypress_command(&mut self, c: u8) -> color_eyre::Result<bool> {
+        if c == 27 {
+            // ESC
+            self.current_mode = Mode::Normal;
+            self.command_buf.clear();
+
+            return Ok(true);
+        } else if c == 127 {
+            // BACKSPACE
+            if self.command_buf.pop().is_none() {
+                self.current_mode = Mode::Normal;
+                self.command_buf.clear();
+            }
+        } else if c.is_ascii_graphic() || c == b' ' {
+            // TODO: check end of window
+            self.command_buf.push(c as char);
+        }
+
+        self.current_mode = Mode::Command;
+
+        Ok(true)
+    }
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -322,6 +366,7 @@ fn main() -> color_eyre::Result<()> {
             Line::with_string("}".to_string()),
         ],
         current_mode: Mode::Normal,
+        command_buf: String::new(),
     };
 
     // TODO: use cfmakeraw instead
@@ -350,6 +395,7 @@ fn main() -> color_eyre::Result<()> {
 
         let current_mode = std::mem::replace(&mut state.current_mode, Mode::Normal);
 
+        // Maybe there is a way to put the handle method in the enum?
         let should_exit = !match current_mode {
             Mode::Normal => state
                 .handle_keypress_normal(c)
@@ -357,6 +403,9 @@ fn main() -> color_eyre::Result<()> {
             Mode::Insertion { buffer } => state
                 .handle_keypress_insertion(c, buffer)
                 .wrap_err("Error while handling keypress [INSERTION]")?,
+            Mode::Command => state
+                .handle_keypress_command(c)
+                .wrap_err("Error while handling keypress [COMMAND]")?,
         };
 
         if should_exit {
