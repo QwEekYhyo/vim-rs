@@ -35,6 +35,20 @@ enum Mode {
     Command,
 }
 
+#[allow(dead_code)]
+#[derive(Debug)]
+enum MessageType {
+    Error,
+    Warning,
+    Info,
+}
+
+#[derive(Debug)]
+struct Message {
+    msg: String,
+    r#type: MessageType,
+}
+
 #[derive(Debug)]
 struct State {
     previous_io_settings: libc::termios,
@@ -45,6 +59,7 @@ struct State {
     text_lines: Vec<Line>,
     current_mode: Mode,
     command_buf: String,
+    message: Message,
 }
 
 const STARTING_COL: usize = 3;
@@ -72,6 +87,19 @@ fn flush(lock: &mut std::io::StdoutLock) -> color_eyre::Result<()> {
     lock.flush().wrap_err("Failed to flush stdout")
 }
 
+macro_rules! write_message {
+    ($lock:expr, $nb_rows:expr, $($arg:tt)*) => {{
+        let msg = format!($($arg)*);
+        term_write!(
+            $lock,
+            "\x1b[{};{}H{}",
+            $nb_rows,
+            1,
+            msg
+        )
+    }};
+}
+
 fn get_window_size() -> Option<WindowSize> {
     let mut window_size: libc::winsize;
     unsafe {
@@ -89,6 +117,16 @@ fn get_window_size() -> Option<WindowSize> {
     }
 
     None
+}
+
+impl Message {
+    const fn has_message(&self) -> bool {
+        !self.msg.is_empty()
+    }
+
+    fn clear(&mut self) {
+        self.msg.clear();
+    }
 }
 
 impl State {
@@ -146,15 +184,27 @@ impl State {
         )?;
 
         if matches!(self.current_mode, Mode::Command) {
-            // Move cursor to input position, write current input, set blinking mode
-            term_write!(
+            write_message!(
                 &mut lock,
-                "\x1b[{};{}H:{}\x1b[25m",
                 self.window_size.row,
-                1,
+                ":{}\x1b[25m",
                 self.command_buf
             )?;
         } else {
+            if self.message.has_message() {
+                write_message!(
+                    &mut lock,
+                    self.window_size.row,
+                    "{}{}\x1b[0m",
+                    match self.message.r#type {
+                        MessageType::Error => "\x1b[1;31m",
+                        MessageType::Warning => "\x1b[0;33m",
+                        MessageType::Info => "",
+                    },
+                    self.message.msg
+                )?;
+            }
+
             let columns = if let Mode::Insertion { buffer } = &self.current_mode {
                 buffer
                     .start
@@ -318,6 +368,7 @@ impl State {
         if c == 27 {
             // ESC
             self.current_mode = Mode::Normal;
+            self.message.clear();
             self.command_buf.clear();
 
             return true;
@@ -362,6 +413,10 @@ fn main() -> color_eyre::Result<()> {
         ],
         current_mode: Mode::Normal,
         command_buf: String::new(),
+        message: Message {
+            msg: "Error you should worry about".to_string(),
+            r#type: MessageType::Error,
+        },
     };
 
     // TODO: use cfmakeraw instead
