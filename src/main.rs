@@ -206,13 +206,12 @@ impl State {
         }
     }
 
-    // Maybe we don't need Result anymore as nothing returns an error
     /// Returns true if the program should continue
-    fn handle_keypress_normal(&mut self, c: u8) -> color_eyre::Result<bool> {
+    fn handle_keypress_normal(&mut self, c: u8) -> bool {
         match c {
             b'h' => {
                 if self.cursor_pos.col == 0 {
-                    return Ok(true);
+                    return true;
                 }
                 self.cursor_pos.col -= 1;
                 self.target_col = self.cursor_pos.col;
@@ -221,7 +220,7 @@ impl State {
                 if let Some(line) = self.get_current_line()
                     && self.cursor_pos.col >= line.len()
                 {
-                    return Ok(true);
+                    return true;
                 }
                 self.cursor_pos.col += 1;
                 self.target_col = self.cursor_pos.col;
@@ -230,14 +229,14 @@ impl State {
                 if self.cursor_pos.row >= self.window_size.row - 3
                     || self.cursor_pos.row >= self.text_lines.len() - 1
                 {
-                    return Ok(true);
+                    return true;
                 }
                 self.cursor_pos.row += 1;
                 self.clamp_col_to_current_line();
             }
             b'k' => {
                 if self.cursor_pos.row == 0 {
-                    return Ok(true);
+                    return true;
                 }
                 self.cursor_pos.row -= 1;
                 self.clamp_col_to_current_line();
@@ -272,7 +271,7 @@ impl State {
                 self.current_mode = Mode::Command;
             }
             b'q' => {
-                return Ok(false);
+                return false;
             }
 
             _ => {
@@ -280,15 +279,11 @@ impl State {
             }
         }
 
-        Ok(true)
+        true
     }
 
     /// Returns true if the program should continue
-    fn handle_keypress_insertion(
-        &mut self,
-        c: u8,
-        mut buffer: SplitBuffer,
-    ) -> color_eyre::Result<bool> {
+    fn handle_keypress_insertion(&mut self, c: u8, mut buffer: SplitBuffer) -> bool {
         // Pressing arrow keys is like 3 inputs, first one being esc
         if c == 27 {
             // ESC
@@ -302,7 +297,7 @@ impl State {
                 line.extend(buffer.end.drain(..));
             }
 
-            return Ok(true);
+            return true;
         } else if c == 127 {
             // BACKSPACE
             if self.cursor_pos.col != 0 && buffer.start.pop().is_some() {
@@ -315,17 +310,17 @@ impl State {
         }
 
         self.current_mode = Mode::Insertion { buffer };
-        Ok(true)
+        true
     }
 
     /// Returns true if the program should continue
-    fn handle_keypress_command(&mut self, c: u8) -> color_eyre::Result<bool> {
+    fn handle_keypress_command(&mut self, c: u8) -> bool {
         if c == 27 {
             // ESC
             self.current_mode = Mode::Normal;
             self.command_buf.clear();
 
-            return Ok(true);
+            return true;
         } else if c == 127 {
             // BACKSPACE
             if self.command_buf.pop().is_none() {
@@ -339,7 +334,7 @@ impl State {
 
         self.current_mode = Mode::Command;
 
-        Ok(true)
+        true
     }
 }
 
@@ -397,15 +392,9 @@ fn main() -> color_eyre::Result<()> {
 
         // Maybe there is a way to put the handle method in the enum?
         let should_exit = !match current_mode {
-            Mode::Normal => state
-                .handle_keypress_normal(c)
-                .wrap_err("Error while handling keypress [NORMAL]")?,
-            Mode::Insertion { buffer } => state
-                .handle_keypress_insertion(c, buffer)
-                .wrap_err("Error while handling keypress [INSERTION]")?,
-            Mode::Command => state
-                .handle_keypress_command(c)
-                .wrap_err("Error while handling keypress [COMMAND]")?,
+            Mode::Normal => state.handle_keypress_normal(c),
+            Mode::Insertion { buffer } => state.handle_keypress_insertion(c, buffer),
+            Mode::Command => state.handle_keypress_command(c),
         };
 
         if should_exit {
