@@ -201,26 +201,34 @@ impl State {
                 self.command_buf
             )?;
         } else {
-            if self.message.has_message() {
+            let columns = if let Mode::Insertion { buffer } = &self.current_mode {
                 write_message!(
                     &mut lock,
                     self.window_size.row,
-                    "{}{}\x1b[0m",
-                    self.message.r#type.ansi_style(),
-                    self.message.msg
+                    "\x1b[1m-- INSERT --\x1b[22m"
                 )?;
-            }
 
-            let columns = if let Mode::Insertion { buffer } = &self.current_mode {
                 buffer
                     .start
                     .iter()
                     .map(|&c| UnicodeWidthChar::width(c).unwrap_or(0))
                     .sum()
-            } else if let Some(line) = self.get_current_line() {
-                line.get_unicode_width_at(self.cursor_pos.col)
             } else {
-                self.cursor_pos.col
+                if self.message.has_message() {
+                    write_message!(
+                        &mut lock,
+                        self.window_size.row,
+                        "{}{}\x1b[0m",
+                        self.message.r#type.ansi_style(),
+                        self.message.msg
+                    )?;
+                }
+
+                if let Some(line) = self.get_current_line() {
+                    line.get_unicode_width_at(self.cursor_pos.col)
+                } else {
+                    self.cursor_pos.col
+                }
             };
 
             // Move cursor to its position, set blinking mode
@@ -256,6 +264,7 @@ impl State {
                 .start
                 .extend(line.chars().take(self.cursor_pos.col));
 
+            self.message.clear();
             self.current_mode = Mode::Insertion {
                 buffer: split_buffer,
             };
