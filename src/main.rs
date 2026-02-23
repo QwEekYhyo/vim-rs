@@ -382,6 +382,11 @@ impl State {
             self.cursor_pos.row += 1;
             self.add_new_line();
             buffer.start.clear();
+        } else if c == 9 {
+            // TAB
+            // TODO: check end of window
+            buffer.start.extend_from_slice(&[' ', ' ', ' ', ' ']);
+            self.cursor_pos.col += 4;
         } else if c.is_ascii_graphic() || c == b' ' {
             // TODO: check end of window
             buffer.start.push(c as char);
