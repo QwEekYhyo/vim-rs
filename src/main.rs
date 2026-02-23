@@ -119,6 +119,16 @@ fn get_window_size() -> Option<WindowSize> {
     None
 }
 
+impl MessageType {
+    const fn ansi_style(&self) -> &str {
+        match self {
+            MessageType::Error => "\x1b[1;31m",
+            MessageType::Warning => "\x1b[0;33m",
+            MessageType::Info => "",
+        }
+    }
+}
+
 impl Message {
     const fn has_message(&self) -> bool {
         !self.msg.is_empty()
@@ -196,11 +206,7 @@ impl State {
                     &mut lock,
                     self.window_size.row,
                     "{}{}\x1b[0m",
-                    match self.message.r#type {
-                        MessageType::Error => "\x1b[1;31m",
-                        MessageType::Warning => "\x1b[0;33m",
-                        MessageType::Info => "",
-                    },
+                    self.message.r#type.ansi_style(),
                     self.message.msg
                 )?;
             }
