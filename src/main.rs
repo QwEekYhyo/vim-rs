@@ -2,7 +2,8 @@ use color_eyre::eyre::{Context, OptionExt};
 use log::debug;
 use std::{
     collections::VecDeque,
-    io::{Read, Write, stdout},
+    fs::File,
+    io::{BufRead, BufReader, Read, Write, stdout},
 };
 use unicode_width::UnicodeWidthChar;
 
@@ -60,6 +61,7 @@ struct State {
     current_mode: Mode,
     command_buf: String,
     message: Message,
+    save_file: Option<String>,
 }
 
 const STARTING_COL: usize = 3;
@@ -426,6 +428,22 @@ impl State {
 fn main() -> color_eyre::Result<()> {
     setup_logger()?;
 
+    let mut lines: Vec<Line> = Vec::new();
+    let mut filename = None;
+    if let Some(path) = std::env::args().nth(1) {
+        if let Ok(f) = File::open(&path) {
+            let reader = BufReader::new(f);
+            lines = reader
+                .lines()
+                .map(|l| Line::with_string(l.unwrap_or_default()))
+                .collect();
+        }
+        filename = Some(path);
+    }
+    if lines.is_empty() {
+        lines.push(Line::new());
+    }
+
     let mut termios: libc::termios = unsafe { std::mem::zeroed() };
 
     cvt(unsafe { libc::tcgetattr(STDIN_FILENO, &raw mut termios) })
@@ -437,20 +455,14 @@ fn main() -> color_eyre::Result<()> {
         window_size: get_window_size().ok_or_eyre("Could not get window size")?,
         cursor_pos: WindowSize { col: 0, row: 0 },
         target_col: 0,
-        text_lines: vec![
-            Line::with_string("#include <stdio.h>".to_string()),
-            Line::with_string("".to_string()),
-            Line::with_string("int main(void) {".to_string()),
-            Line::with_string("    printf(\"%s\\n\", \"🍆\");".to_string()),
-            Line::with_string("    return 0;".to_string()),
-            Line::with_string("}".to_string()),
-        ],
+        text_lines: lines,
         current_mode: Mode::Normal,
         command_buf: String::new(),
         message: Message {
             msg: "Error you should worry about".to_string(),
             r#type: MessageType::Error,
         },
+        save_file: filename,
     };
 
     // TODO: use cfmakeraw instead
