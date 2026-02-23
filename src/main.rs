@@ -271,6 +271,14 @@ impl State {
         }
     }
 
+    fn add_new_line(&mut self) {
+        // This should not allocate yet so this is good
+        // It is assumed the cursor cannot be out of bounds
+        // This assumption is only true if I know how to code correctly
+        self.text_lines.insert(self.cursor_pos.row, Line::new());
+        self.cursor_pos.col = 0;
+    }
+
     /// Returns true if the program should continue
     fn handle_keypress_normal(&mut self, c: u8) -> bool {
         match c {
@@ -290,7 +298,7 @@ impl State {
                 self.cursor_pos.col += 1;
                 self.target_col = self.cursor_pos.col;
             }
-            b'j' => {
+            b'j' | 10 => {
                 if self.cursor_pos.row >= self.window_size.row - 3
                     || self.cursor_pos.row >= self.text_lines.len() - 1
                 {
@@ -321,15 +329,11 @@ impl State {
             }
             b'o' => {
                 self.cursor_pos.row += 1;
-                if self.cursor_pos.row == self.text_lines.len() {
-                    // This should not allocate yet so this is good
-                    self.text_lines.push(Line::new());
-                } else {
-                    // Just else because it is assumed the cursor cannot be out of bounds
-                    // This assumption is only true if I know how to code correctly
-                    self.text_lines.insert(self.cursor_pos.row, Line::new());
-                }
-                self.cursor_pos.col = 0;
+                self.add_new_line();
+                self.enable_insertion_mode();
+            }
+            b'O' => {
+                self.add_new_line();
                 self.enable_insertion_mode();
             }
             b':' => {
@@ -368,6 +372,16 @@ impl State {
             if self.cursor_pos.col != 0 && buffer.start.pop().is_some() {
                 self.cursor_pos.col -= 1;
             }
+        } else if c == 10 {
+            // ENTER
+            if let Some(line) = self.get_current_line_mut() {
+                line.reserve(buffer.start.len());
+                line.clear();
+                line.extend(buffer.start.drain(..));
+            }
+            self.cursor_pos.row += 1;
+            self.add_new_line();
+            buffer.start.clear();
         } else if c.is_ascii_graphic() || c == b' ' {
             // TODO: check end of window
             buffer.start.push(c as char);
