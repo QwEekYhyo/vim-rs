@@ -12,8 +12,9 @@ use libc::{
     ECHO, ICANON, ISIG, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO, TCSAFLUSH, TCSANOW, TIOCGWINSZ,
 };
 
-use crate::{line::Line, logger::setup_logger};
+use crate::{command_parser::Command, line::Line, logger::setup_logger};
 
+mod command_parser;
 mod line;
 mod logger;
 
@@ -413,7 +414,21 @@ impl State {
             if self.command_buf.pop().is_none() {
                 self.current_mode = Mode::Normal;
                 self.command_buf.clear();
+
+                return true;
             }
+        } else if c == 10 {
+            // ENTER
+            self.current_mode = Mode::Normal;
+            self.message.clear();
+            let res = Command::parse(&self.command_buf);
+            match res {
+                Ok(_) => todo!(),
+                Err(err) => self.handle_parse_error(err),
+            }
+            self.command_buf.clear();
+
+            return true;
         } else if c.is_ascii_graphic() || c == b' ' {
             // TODO: check end of window
             self.command_buf.push(c as char);
