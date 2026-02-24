@@ -63,6 +63,7 @@ struct State {
     command_buf: String,
     message: Message,
     save_file: Option<String>,
+    dirty: bool,
 }
 
 const STARTING_COL: usize = 3;
@@ -125,7 +126,7 @@ fn get_window_size() -> Option<WindowSize> {
 impl MessageType {
     const fn ansi_style(&self) -> &str {
         match self {
-            MessageType::Error => "\x1b[1;31m",
+            MessageType::Error => "\x1b[1;3;31m",
             MessageType::Warning => "\x1b[0;33m",
             MessageType::Info => "",
         }
@@ -280,6 +281,7 @@ impl State {
         // This assumption is only true if I know how to code correctly
         self.text_lines.insert(self.cursor_pos.row, Line::new());
         self.cursor_pos.col = 0;
+        self.dirty = true;
     }
 
     /// Returns true if the program should continue
@@ -323,6 +325,7 @@ impl State {
                     let lines_below = &mut self.text_lines[self.cursor_pos.row..];
                     lines_below.rotate_left(1);
 
+                    self.dirty = true;
                     // This is not how Vim does it but whatever for now
                     self.clamp_col_to_current_line();
                 }
@@ -374,6 +377,7 @@ impl State {
             // BACKSPACE
             if self.cursor_pos.col != 0 && buffer.start.pop().is_some() {
                 self.cursor_pos.col -= 1;
+                self.dirty = true;
             }
         } else if c == 10 {
             // ENTER
@@ -390,10 +394,12 @@ impl State {
             // TODO: check end of window
             buffer.start.extend_from_slice(&[' ', ' ', ' ', ' ']);
             self.cursor_pos.col += 4;
+            self.dirty = true;
         } else if c.is_ascii_graphic() || c == b' ' {
             // TODO: check end of window
             buffer.start.push(c as char);
             self.cursor_pos.col += 1;
+            self.dirty = true;
         }
 
         self.current_mode = Mode::Insertion { buffer };
@@ -421,12 +427,16 @@ impl State {
             // ENTER
             self.current_mode = Mode::Normal;
             self.message.clear();
+
             let res = Command::parse(&self.command_buf);
+            self.command_buf.clear();
+
             match res {
-                Ok(_) => todo!(),
+                Ok(cmd) => {
+                    return self.handle_command(cmd);
+                }
                 Err(err) => self.handle_parse_error(err),
             }
-            self.command_buf.clear();
 
             return true;
         } else if c.is_ascii_graphic() || c == b' ' {
@@ -478,6 +488,7 @@ fn main() -> color_eyre::Result<()> {
             r#type: MessageType::Error,
         },
         save_file: filename,
+        dirty: false,
     };
 
     // TODO: use cfmakeraw instead

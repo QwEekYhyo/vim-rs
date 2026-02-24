@@ -36,7 +36,24 @@ impl Command {
 }
 
 impl State {
-    pub fn handle_command(&mut self, cmd: Command) {}
+    /// Returns true if the program should continue
+    pub fn handle_command(&mut self, cmd: Command) -> bool {
+        match cmd {
+            Command::Save { filename } => todo!(),
+            Command::Quit { forcefully } => {
+                if !forcefully && self.dirty {
+                    "No write since last change (add ! to override)"
+                        .clone_into(&mut self.message.msg);
+                    return true;
+                }
+                return false;
+            }
+            Command::SaveAndQuit { filename } => todo!(),
+            Command::None => todo!(),
+        }
+
+        true
+    }
 
     pub fn handle_parse_error(&mut self, err: ParseError) {
         match err {
