@@ -1,21 +1,25 @@
 use color_eyre::eyre::{Context, ContextCompat, OptionExt};
-use log::debug;
+use log::{debug, warn};
 use std::{
     collections::VecDeque,
     fs::File,
-    io::{BufRead, BufReader, Read, Write, stdout},
+    io::{BufRead, BufReader, Write, stdout},
     path::PathBuf,
 };
 use unicode_width::UnicodeWidthChar;
 
 use cvt::cvt;
-use libc::{
-    ECHO, ICANON, ISIG, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO, TCSAFLUSH, TCSANOW, TIOCGWINSZ,
+use libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO, TCSAFLUSH, TCSANOW, TIOCGWINSZ};
+
+use crate::{
+    command_parser::Command,
+    key::{Key, SequenceParsingError, read_key},
+    line::Line,
+    logger::setup_logger,
 };
 
-use crate::{command_parser::Command, line::Line, logger::setup_logger};
-
 mod command_parser;
+mod key;
 mod line;
 mod logger;
 mod utils;
@@ -287,16 +291,16 @@ impl State {
     }
 
     /// Returns true if the program should continue
-    fn handle_keypress_normal(&mut self, c: u8) -> bool {
-        match c {
-            b'h' => {
+    fn handle_keypress_normal(&mut self, key: Key) -> bool {
+        match key {
+            Key::ArrowLeft | Key::Char(b'h') | Key::Backspace => {
                 if self.cursor_pos.col == 0 {
                     return true;
                 }
                 self.cursor_pos.col -= 1;
                 self.target_col = self.cursor_pos.col;
             }
-            b'l' => {
+            Key::ArrowRight | Key::Char(b'l') => {
                 if let Some(line) = self.get_current_line()
                     && self.cursor_pos.col >= line.len()
                 {
@@ -305,7 +309,7 @@ impl State {
                 self.cursor_pos.col += 1;
                 self.target_col = self.cursor_pos.col;
             }
-            b'j' | 10 => {
+            Key::ArrowDown | Key::Char(b'j') | Key::Enter => {
                 if self.cursor_pos.row >= self.window_size.row - 3
                     || self.cursor_pos.row >= self.text_lines.len() - 1
                 {
@@ -314,7 +318,7 @@ impl State {
                 self.cursor_pos.row += 1;
                 self.clamp_col_to_current_line();
             }
-            b'k' => {
+            Key::ArrowUp | Key::Char(b'k') => {
                 if self.cursor_pos.row == 0 {
                     return true;
                 }
@@ -322,7 +326,7 @@ impl State {
                 self.clamp_col_to_current_line();
             }
             // TODO: change this to dd
-            b'd' => {
+            Key::Char(b'd') => {
                 if let Some(line) = self.get_current_line_mut() {
                     line.clear();
                     let lines_below = &mut self.text_lines[self.cursor_pos.row..];
@@ -333,38 +337,38 @@ impl State {
                     self.clamp_col_to_current_line();
                 }
             }
-            b'i' => {
+            Key::Char(b'i') => {
                 self.enable_insertion_mode();
             }
-            b'I' => {
+            Key::Char(b'I') => {
                 self.cursor_pos.col = 0;
                 self.enable_insertion_mode();
             }
-            b'A' => {
+            Key::Char(b'A') => {
                 if let Some(line) = self.get_current_line() {
                     self.cursor_pos.col = line.len();
                     self.enable_insertion_mode();
                 }
             }
-            b'o' => {
+            Key::Char(b'o') => {
                 self.cursor_pos.row += 1;
                 self.add_new_line();
                 self.enable_insertion_mode();
             }
-            b'O' => {
+            Key::Char(b'O') => {
                 self.add_new_line();
                 self.enable_insertion_mode();
             }
-            b':' => {
+            Key::Char(b':') => {
                 self.current_mode = Mode::Command;
             }
             // TODO: change this to ZZ
-            b'Z' => {
+            Key::Char(b'Z') => {
                 return false;
             }
 
             _ => {
-                debug!("{c}");
+                debug!("{key:?}");
             }
         }
 
@@ -372,48 +376,55 @@ impl State {
     }
 
     /// Returns true if the program should continue
-    fn handle_keypress_insertion(&mut self, c: u8, mut buffer: SplitBuffer) -> bool {
-        // Pressing arrow keys is like 3 inputs, first one being esc
-        if c == 27 {
-            // ESC
-            self.current_mode = Mode::Normal;
-            self.target_col = self.cursor_pos.col;
-
-            if let Some(line) = self.get_current_line_mut() {
-                line.reserve(buffer.start.len() + buffer.end.len());
-                line.clear();
-                line.extend(buffer.start.drain(..));
-                line.extend(buffer.end.drain(..));
-            }
-
-            return true;
-        } else if c == 127 {
-            // BACKSPACE
-            if self.cursor_pos.col != 0 && buffer.start.pop().is_some() {
-                self.cursor_pos.col -= 1;
+    fn handle_keypress_insertion(&mut self, key: Key, mut buffer: SplitBuffer) -> bool {
+        match key {
+            Key::Char(c) => {
+                // TODO: check end of window
+                buffer.start.push(c as char);
+                self.cursor_pos.col += 1;
                 self.dirty = true;
             }
-        } else if c == 10 {
-            // ENTER
-            if let Some(line) = self.get_current_line_mut() {
-                line.reserve(buffer.start.len());
-                line.clear();
-                line.extend(buffer.start.drain(..));
+            Key::Escape => {
+                self.current_mode = Mode::Normal;
+                self.target_col = self.cursor_pos.col;
+
+                if let Some(line) = self.get_current_line_mut() {
+                    line.reserve(buffer.start.len() + buffer.end.len());
+                    line.clear();
+                    line.extend(buffer.start.drain(..));
+                    line.extend(buffer.end.drain(..));
+                }
+
+                return true;
             }
-            self.cursor_pos.row += 1;
-            self.add_new_line();
-            buffer.start.clear();
-        } else if c == 9 {
-            // TAB
-            // TODO: check end of window
-            buffer.start.extend_from_slice(&[' ', ' ', ' ', ' ']);
-            self.cursor_pos.col += 4;
-            self.dirty = true;
-        } else if c.is_ascii_graphic() || c == b' ' {
-            // TODO: check end of window
-            buffer.start.push(c as char);
-            self.cursor_pos.col += 1;
-            self.dirty = true;
+            Key::Delete => {
+                if buffer.end.pop_front().is_some() {
+                    self.dirty = true;
+                }
+            }
+            Key::Backspace => {
+                if self.cursor_pos.col != 0 && buffer.start.pop().is_some() {
+                    self.cursor_pos.col -= 1;
+                    self.dirty = true;
+                }
+            }
+            Key::Enter => {
+                if let Some(line) = self.get_current_line_mut() {
+                    line.reserve(buffer.start.len());
+                    line.clear();
+                    line.extend(buffer.start.drain(..));
+                }
+                self.cursor_pos.row += 1;
+                self.add_new_line();
+                buffer.start.clear();
+            }
+            Key::Tab => {
+                // TODO: check end of window
+                buffer.start.extend_from_slice(&[' ', ' ', ' ', ' ']);
+                self.cursor_pos.col += 4;
+                self.dirty = true;
+            }
+            _ => {}
         }
 
         self.current_mode = Mode::Insertion { buffer };
@@ -421,43 +432,50 @@ impl State {
     }
 
     /// Returns true if the program should continue
-    fn handle_keypress_command(&mut self, c: u8) -> bool {
-        if c == 27 {
-            // ESC
-            self.current_mode = Mode::Normal;
-            self.message.clear();
-            self.command_buf.clear();
-
-            return true;
-        } else if c == 127 {
-            // BACKSPACE
-            if self.command_buf.pop().is_none() {
+    fn handle_keypress_command(&mut self, key: Key) -> bool {
+        match key {
+            Key::Char(c) => {
+                // TODO: check end of window
+                self.command_buf.push(c as char);
+            }
+            Key::Escape => {
                 self.current_mode = Mode::Normal;
+                self.message.clear();
                 self.command_buf.clear();
 
                 return true;
             }
-        } else if c == 10 {
-            // ENTER
-            self.current_mode = Mode::Normal;
-            self.message.clear();
+            Key::ArrowUp => todo!(),
+            Key::ArrowDown => todo!(),
+            Key::ArrowLeft => todo!(),
+            Key::ArrowRight => todo!(),
+            Key::Delete => todo!(),
+            Key::Tab => todo!(),
+            Key::Backspace => {
+                if self.command_buf.pop().is_none() {
+                    self.current_mode = Mode::Normal;
+                    self.command_buf.clear();
 
-            let res = Command::parse(&self.command_buf);
-            self.command_buf.clear();
-
-            match res {
-                Ok(cmd) => {
-                    return self.handle_command(cmd);
+                    return true;
                 }
-                Err(err) => self.handle_parse_error(err),
             }
+            Key::Enter => {
+                self.current_mode = Mode::Normal;
+                self.message.clear();
 
-            return true;
-        } else if c.is_ascii_graphic() || c == b' ' {
-            // TODO: check end of window
-            self.command_buf.push(c as char);
+                let res = Command::parse(&self.command_buf);
+                self.command_buf.clear();
+
+                match res {
+                    Ok(cmd) => {
+                        return self.handle_command(cmd);
+                    }
+                    Err(err) => self.handle_parse_error(err),
+                }
+
+                return true;
+            }
         }
-
         self.current_mode = Mode::Command;
 
         true
@@ -519,8 +537,11 @@ fn main() -> color_eyre::Result<()> {
         dirty: false,
     };
 
-    // TODO: use cfmakeraw instead
-    state.current_io_settings.c_lflag &= !(ECHO | ICANON | ISIG);
+    unsafe {
+        libc::cfmakeraw(&raw mut state.current_io_settings);
+    }
+    state.current_io_settings.c_cc[libc::VMIN] = 0;
+    state.current_io_settings.c_cc[libc::VTIME] = 1;
 
     cvt(unsafe {
         libc::tcsetattr(
@@ -531,29 +552,33 @@ fn main() -> color_eyre::Result<()> {
     })
     .wrap_err("Could not set terminal parameters")?;
 
-    let mut buffer = [0u8; 1];
-
     state.init_ui().wrap_err("Failed to initialize UI")?;
 
     let mut stdin_lock = std::io::stdin().lock();
     loop {
-        stdin_lock
-            .read_exact(&mut buffer)
-            .wrap_err("Could not read character from standard input")?;
+        match read_key(&mut stdin_lock) {
+            Ok(key) => {
+                let current_mode = std::mem::replace(&mut state.current_mode, Mode::Normal);
 
-        let c = buffer[0];
+                // Maybe there is a way to put the handle method in the enum?
+                let should_exit = !match current_mode {
+                    Mode::Normal => state.handle_keypress_normal(key),
+                    Mode::Insertion { buffer } => state.handle_keypress_insertion(key, buffer),
+                    Mode::Command => state.handle_keypress_command(key),
+                };
 
-        let current_mode = std::mem::replace(&mut state.current_mode, Mode::Normal);
-
-        // Maybe there is a way to put the handle method in the enum?
-        let should_exit = !match current_mode {
-            Mode::Normal => state.handle_keypress_normal(c),
-            Mode::Insertion { buffer } => state.handle_keypress_insertion(c, buffer),
-            Mode::Command => state.handle_keypress_command(c),
-        };
-
-        if should_exit {
-            break;
+                if should_exit {
+                    break;
+                }
+            }
+            Err(e) => {
+                if matches!(e, SequenceParsingError::NoChar) {
+                    continue;
+                }
+                warn!("Unsupported input: {e:?}");
+                "Received unsupported input".clone_into(&mut state.message.msg);
+                state.message.r#type = MessageType::Warning;
+            }
         }
 
         state.draw_ui().wrap_err("Failed to draw UI")?;
