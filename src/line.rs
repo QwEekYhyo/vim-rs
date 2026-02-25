@@ -65,6 +65,11 @@ impl Line {
     }
 
     #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.text.as_bytes()
+    }
+
+    #[must_use]
     pub const fn len(&self) -> usize {
         self.len
     }

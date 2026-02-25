@@ -1,4 +1,4 @@
-use crate::State;
+use crate::{MessageType, State, utils::save_to_file};
 
 #[derive(Debug)]
 pub enum Command {
@@ -41,9 +41,30 @@ impl State {
     /// Returns true if the program should continue
     pub fn handle_command(&mut self, cmd: Command) -> bool {
         match cmd {
-            Command::Save { filename } => todo!(),
+            Command::Save { filename } => {
+                if let Some(path) = filename {
+                    if save_to_file(&path, &self.text_lines).is_ok() {
+                        if self.save_file.is_none() {
+                            self.dirty = false;
+                            self.save_file = Some(path.into());
+                        }
+                    } else {
+                        // do something
+                    }
+                } else if let Some(path) = &self.save_file {
+                    if save_to_file(path, &self.text_lines).is_ok() {
+                        self.dirty = false;
+                    } else {
+                        // do something
+                    }
+                } else {
+                    self.message.r#type = MessageType::Error;
+                    "No file name".clone_into(&mut self.message.msg);
+                }
+            }
             Command::Quit { forcefully } => {
                 if !forcefully && self.dirty {
+                    self.message.r#type = MessageType::Error;
                     "No write since last change (add ! to override)"
                         .clone_into(&mut self.message.msg);
                     return true;
@@ -61,13 +82,13 @@ impl State {
         match err {
             ParseError::UnknownCommand(unknown) => {
                 self.message = crate::Message {
-                    msg: format!("Not an editor command: {}", unknown),
+                    msg: format!("Not an editor command: {unknown}"),
                     r#type: crate::MessageType::Error,
                 }
             }
             ParseError::TrailingCharacters(trailing) => {
                 self.message = crate::Message {
-                    msg: format!("Trailing characters: {}", trailing),
+                    msg: format!("Trailing characters: {trailing}"),
                     r#type: crate::MessageType::Error,
                 }
             }

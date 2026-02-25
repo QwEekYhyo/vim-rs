@@ -4,6 +4,7 @@ use std::{
     collections::VecDeque,
     fs::File,
     io::{BufRead, BufReader, Read, Write, stdout},
+    path::PathBuf,
 };
 use unicode_width::UnicodeWidthChar;
 
@@ -17,6 +18,7 @@ use crate::{command_parser::Command, line::Line, logger::setup_logger};
 mod command_parser;
 mod line;
 mod logger;
+mod utils;
 
 #[derive(Debug)]
 struct WindowSize {
@@ -62,7 +64,7 @@ struct State {
     current_mode: Mode,
     command_buf: String,
     message: Message,
-    save_file: Option<String>,
+    save_file: Option<PathBuf>,
     dirty: bool,
 }
 
@@ -457,7 +459,8 @@ fn main() -> color_eyre::Result<()> {
 
     let mut lines: Vec<Line> = Vec::new();
     let mut filename = None;
-    if let Some(path) = std::env::args().nth(1) {
+    if let Some(arg) = std::env::args_os().nth(1) {
+        let path: PathBuf = arg.into();
         if let Ok(f) = File::open(&path) {
             let reader = BufReader::new(f);
             lines = reader
