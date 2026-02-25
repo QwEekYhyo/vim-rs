@@ -319,6 +319,7 @@ impl State {
                 self.cursor_pos.row -= 1;
                 self.clamp_col_to_current_line();
             }
+            // TODO: change this to dd
             b'd' => {
                 if let Some(line) = self.get_current_line_mut() {
                     line.clear();
@@ -345,7 +346,8 @@ impl State {
             b':' => {
                 self.current_mode = Mode::Command;
             }
-            b'q' => {
+            // TODO: change this to ZZ
+            b'Z' => {
                 return false;
             }
 

@@ -18,9 +18,11 @@ impl Command {
     pub fn parse(input: &str) -> Result<Self, ParseError> {
         let parts: Vec<&str> = input.split_whitespace().collect();
         match parts.as_slice() {
-            ["q"] => Ok(Command::Quit { forcefully: false }),
-            ["q!"] => Ok(Command::Quit { forcefully: true }),
-            ["q" | "q!", trailing @ ..] => Err(ParseError::TrailingCharacters(trailing.join(" "))),
+            ["q" | "quit"] => Ok(Command::Quit { forcefully: false }),
+            ["q!" | "quit!"] => Ok(Command::Quit { forcefully: true }),
+            ["q" | "q!" | "quit" | "quit!", trailing @ ..] => {
+                Err(ParseError::TrailingCharacters(trailing.join(" ")))
+            }
             ["w"] => Ok(Command::Save { filename: None }),
             ["w", filename @ ..] => Ok(Command::Save {
                 filename: Some(filename.join(" ")),
@@ -89,6 +91,18 @@ mod tests {
         assert!(matches!(res, Err(ParseError::TrailingCharacters(_))));
 
         let res = Command::parse("q! trailing");
+        assert!(matches!(res, Err(ParseError::TrailingCharacters(_))));
+
+        let cmd = Command::parse("quit").unwrap();
+        assert!(matches!(cmd, Command::Quit { forcefully: false }));
+
+        let cmd = Command::parse("quit!").unwrap();
+        assert!(matches!(cmd, Command::Quit { forcefully: true }));
+
+        let res = Command::parse("quit trailing");
+        assert!(matches!(res, Err(ParseError::TrailingCharacters(_))));
+
+        let res = Command::parse("quit! trailing");
         assert!(matches!(res, Err(ParseError::TrailingCharacters(_))));
     }
 
