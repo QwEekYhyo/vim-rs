@@ -27,8 +27,8 @@ impl Command {
             ["w", filename @ ..] => Ok(Command::Save {
                 filename: Some(filename.join(" ")),
             }),
-            ["wq" | "x"] => Ok(Command::SaveAndQuit { filename: None }),
-            ["wq" | "x", filename @ ..] => Ok(Command::SaveAndQuit {
+            ["wq" | "wq!" | "x"] => Ok(Command::SaveAndQuit { filename: None }),
+            ["wq" | "wq!" | "x", filename @ ..] => Ok(Command::SaveAndQuit {
                 filename: Some(filename.join(" ")),
             }),
             [unknown, ..] => Err(ParseError::UnknownCommand((*unknown).to_owned())),
@@ -42,24 +42,21 @@ impl State {
     pub fn handle_command(&mut self, cmd: Command) -> bool {
         match cmd {
             Command::Save { filename } => {
-                if let Some(path) = filename {
-                    if save_to_file(&path, &self.text_lines).is_ok() {
-                        if self.save_file.is_none() {
+                let path = filename.map(Into::into).or_else(|| self.save_file.clone());
+
+                match path {
+                    Some(path) => {
+                        if save_to_file(&path, &self.text_lines).is_ok() {
                             self.dirty = false;
-                            self.save_file = Some(path.into());
+                            self.save_file.get_or_insert(path);
+                        } else {
+                            // do something
                         }
-                    } else {
-                        // do something
                     }
-                } else if let Some(path) = &self.save_file {
-                    if save_to_file(path, &self.text_lines).is_ok() {
-                        self.dirty = false;
-                    } else {
-                        // do something
+                    None => {
+                        self.message.r#type = MessageType::Error;
+                        "No file name".clone_into(&mut self.message.msg);
                     }
-                } else {
-                    self.message.r#type = MessageType::Error;
-                    "No file name".clone_into(&mut self.message.msg);
                 }
             }
             Command::Quit { forcefully } => {
@@ -71,7 +68,10 @@ impl State {
                 }
                 return false;
             }
-            Command::SaveAndQuit { filename } => todo!(),
+            Command::SaveAndQuit { filename } => {
+                self.handle_command(Command::Save { filename });
+                return self.dirty;
+            }
             Command::None => {}
         }
 
