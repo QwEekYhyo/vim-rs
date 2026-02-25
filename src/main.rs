@@ -1,4 +1,4 @@
-use color_eyre::eyre::{Context, OptionExt};
+use color_eyre::eyre::{Context, ContextCompat, OptionExt};
 use log::debug;
 use std::{
     collections::VecDeque,
@@ -459,14 +459,27 @@ fn main() -> color_eyre::Result<()> {
 
     let mut lines: Vec<Line> = Vec::new();
     let mut filename = None;
+    let mut file_info = String::with_capacity(30);
     if let Some(arg) = std::env::args_os().nth(1) {
         let path: PathBuf = arg.into();
+        // TODO: make this a future or some shit
         if let Ok(f) = File::open(&path) {
-            let reader = BufReader::new(f);
+            let reader = BufReader::new(&f);
             lines = reader
                 .lines()
                 .map(|l| Line::with_string(l.unwrap_or_default()))
                 .collect();
+
+            let metadata = f.metadata()?;
+            format!(
+                "\"{}\" {}L, {}B",
+                path.file_name()
+                    .wrap_err("Failed to read filename")?
+                    .display(),
+                lines.len(),
+                metadata.len()
+            )
+            .clone_into(&mut file_info);
         }
         filename = Some(path);
     }
@@ -489,8 +502,8 @@ fn main() -> color_eyre::Result<()> {
         current_mode: Mode::Normal,
         command_buf: String::new(),
         message: Message {
-            msg: "Error you should worry about".to_string(),
-            r#type: MessageType::Error,
+            msg: file_info,
+            r#type: MessageType::Info,
         },
         save_file: filename,
         dirty: false,

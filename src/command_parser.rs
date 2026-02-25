@@ -72,7 +72,7 @@ impl State {
                 return false;
             }
             Command::SaveAndQuit { filename } => todo!(),
-            Command::None => todo!(),
+            Command::None => {}
         }
 
         true
