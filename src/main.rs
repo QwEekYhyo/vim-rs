@@ -336,6 +336,16 @@ impl State {
             b'i' => {
                 self.enable_insertion_mode();
             }
+            b'I' => {
+                self.cursor_pos.col = 0;
+                self.enable_insertion_mode();
+            }
+            b'A' => {
+                if let Some(line) = self.get_current_line() {
+                    self.cursor_pos.col = line.len();
+                    self.enable_insertion_mode();
+                }
+            }
             b'o' => {
                 self.cursor_pos.row += 1;
                 self.add_new_line();
