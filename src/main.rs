@@ -65,6 +65,7 @@ struct State {
     cursor_pos: WindowSize,
     target_col: usize,
     text_lines: Vec<Line>,
+    text_offset: usize,
     current_mode: Mode,
     command_buf: String,
     message: Message,
@@ -151,11 +152,12 @@ impl Message {
 
 impl State {
     fn get_current_line(&self) -> Option<&Line> {
-        self.text_lines.get(self.cursor_pos.row)
+        self.text_lines.get(self.cursor_pos.row + self.text_offset)
     }
 
     fn get_current_line_mut(&mut self) -> Option<&mut Line> {
-        self.text_lines.get_mut(self.cursor_pos.row)
+        self.text_lines
+            .get_mut(self.cursor_pos.row + self.text_offset)
     }
 
     fn init_ui(&mut self) -> color_eyre::Result<()> {
@@ -189,7 +191,9 @@ impl State {
                 term_write!(
                     &mut lock,
                     "{}",
-                    self.text_lines.get(n_line).map_or("", |line| line.as_str())
+                    self.text_lines
+                        .get(n_line + self.text_offset)
+                        .map_or("", |line| line.as_str())
                 )?;
             }
 
@@ -285,7 +289,8 @@ impl State {
         // This should not allocate yet so this is good
         // It is assumed the cursor cannot be out of bounds
         // This assumption is only true if I know how to code correctly
-        self.text_lines.insert(self.cursor_pos.row, Line::new());
+        self.text_lines
+            .insert(self.cursor_pos.row + self.text_offset, Line::new());
         self.cursor_pos.col = 0;
         self.dirty = true;
     }
@@ -310,26 +315,34 @@ impl State {
                 self.target_col = self.cursor_pos.col;
             }
             Key::ArrowDown | Key::Char(b'j') | Key::Enter => {
-                if self.cursor_pos.row >= self.window_size.row - 3
-                    || self.cursor_pos.row >= self.text_lines.len() - 1
-                {
+                if self.cursor_pos.row + self.text_offset >= self.text_lines.len() - 1 {
                     return true;
                 }
-                self.cursor_pos.row += 1;
+                if self.cursor_pos.row >= self.window_size.row - 3 {
+                    self.text_offset += 1;
+                } else {
+                    self.cursor_pos.row += 1;
+                }
                 self.clamp_col_to_current_line();
             }
             Key::ArrowUp | Key::Char(b'k') => {
                 if self.cursor_pos.row == 0 {
-                    return true;
+                    if self.text_offset == 0 {
+                        return true;
+                    }
+
+                    self.text_offset -= 1;
+                } else {
+                    self.cursor_pos.row -= 1;
                 }
-                self.cursor_pos.row -= 1;
                 self.clamp_col_to_current_line();
             }
             // TODO: change this to dd
             Key::Char(b'd') => {
                 if let Some(line) = self.get_current_line_mut() {
                     line.clear();
-                    let lines_below = &mut self.text_lines[self.cursor_pos.row..];
+                    let lines_below =
+                        &mut self.text_lines[self.cursor_pos.row + self.text_offset..];
                     lines_below.rotate_left(1);
 
                     self.dirty = true;
@@ -351,7 +364,11 @@ impl State {
                 }
             }
             Key::Char(b'o') => {
-                self.cursor_pos.row += 1;
+                if self.cursor_pos.row >= self.window_size.row - 3 {
+                    self.text_offset += 1;
+                } else {
+                    self.cursor_pos.row += 1;
+                }
                 self.add_new_line();
                 self.enable_insertion_mode();
             }
@@ -414,7 +431,11 @@ impl State {
                     line.clear();
                     line.extend(buffer.start.drain(..));
                 }
-                self.cursor_pos.row += 1;
+                if self.cursor_pos.row >= self.window_size.row - 3 {
+                    self.text_offset += 1;
+                } else {
+                    self.cursor_pos.row += 1;
+                }
                 self.add_new_line();
                 buffer.start.clear();
             }
@@ -527,6 +548,7 @@ fn main() -> color_eyre::Result<()> {
         cursor_pos: WindowSize { col: 0, row: 0 },
         target_col: 0,
         text_lines: lines,
+        text_offset: 0,
         current_mode: Mode::Normal,
         command_buf: String::new(),
         message: Message {
