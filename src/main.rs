@@ -337,6 +337,21 @@ impl State {
                 }
                 self.clamp_col_to_current_line();
             }
+            // TODO: change this to gg
+            Key::Char(b'g') => {
+                self.text_offset = 0;
+                self.cursor_pos.row = 0;
+                self.cursor_pos.col = 0;
+            }
+            Key::Char(b'G') => {
+                if self.text_lines.len() > self.window_size.row - 2 {
+                    self.text_offset = self.text_lines.len() - self.window_size.row + 2;
+                    self.cursor_pos.row = self.window_size.row - 3;
+                } else {
+                    self.cursor_pos.row = self.text_lines.len() - 1;
+                }
+                self.cursor_pos.col = 0;
+            }
             // TODO: change this to dd
             Key::Char(b'd') => {
                 if let Some(line) = self.get_current_line_mut() {
