@@ -44,19 +44,16 @@ impl State {
             Command::Save { filename } => {
                 let path = filename.map(Into::into).or_else(|| self.save_file.clone());
 
-                match path {
-                    Some(path) => {
-                        if save_to_file(&path, &self.text_lines).is_ok() {
-                            self.dirty = false;
-                            self.save_file.get_or_insert(path);
-                        } else {
-                            // do something
-                        }
+                if let Some(path) = path {
+                    if save_to_file(&path, &self.text_lines).is_ok() {
+                        self.dirty = false;
+                        self.save_file.get_or_insert(path);
+                    } else {
+                        // do something
                     }
-                    None => {
-                        self.message.r#type = MessageType::Error;
-                        "No file name".clone_into(&mut self.message.msg);
-                    }
+                } else {
+                    self.message.r#type = MessageType::Error;
+                    "No file name".clone_into(&mut self.message.msg);
                 }
             }
             Command::Quit { forcefully } => {

@@ -296,7 +296,7 @@ impl State {
     }
 
     /// Returns true if the program should continue
-    fn handle_keypress_normal(&mut self, key: Key) -> bool {
+    fn handle_keypress_normal(&mut self, key: &Key) -> bool {
         match key {
             Key::ArrowLeft | Key::Char(b'h') | Key::Backspace => {
                 if self.cursor_pos.col == 0 {
@@ -393,11 +393,11 @@ impl State {
     }
 
     /// Returns true if the program should continue
-    fn handle_keypress_insertion(&mut self, key: Key, mut buffer: SplitBuffer) -> bool {
+    fn handle_keypress_insertion(&mut self, key: &Key, mut buffer: SplitBuffer) -> bool {
         match key {
             Key::Char(c) => {
                 // TODO: check end of window
-                buffer.start.push(c as char);
+                buffer.start.push(*c as char);
                 self.cursor_pos.col += 1;
                 self.dirty = true;
             }
@@ -453,11 +453,11 @@ impl State {
     }
 
     /// Returns true if the program should continue
-    fn handle_keypress_command(&mut self, key: Key) -> bool {
+    fn handle_keypress_command(&mut self, key: &Key) -> bool {
         match key {
             Key::Char(c) => {
                 // TODO: check end of window
-                self.command_buf.push(c as char);
+                self.command_buf.push(*c as char);
             }
             Key::Escape => {
                 self.current_mode = Mode::Normal;
@@ -578,7 +578,7 @@ fn main() -> color_eyre::Result<()> {
 
     let mut stdin_lock = std::io::stdin().lock();
     loop {
-        match read_key(&mut stdin_lock) {
+        match &read_key(&mut stdin_lock) {
             Ok(key) => {
                 let current_mode = std::mem::replace(&mut state.current_mode, Mode::Normal);
 

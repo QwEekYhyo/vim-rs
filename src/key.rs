@@ -31,7 +31,7 @@ impl Display for SequenceParsingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SequenceParsingError::UnknownSequence(seq) => {
-                write!(f, "Received unknown escape sequence: {:?}", seq)
+                write!(f, "Received unknown escape sequence: {seq:?}")
             }
             SequenceParsingError::UnknownChar(c) => {
                 write!(f, "Received unknown character: {}", *c as char)
