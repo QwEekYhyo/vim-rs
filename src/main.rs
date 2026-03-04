@@ -73,7 +73,7 @@ struct State {
     dirty: bool,
 }
 
-const STARTING_COL: usize = 3;
+const STARTING_COL: usize = 4;
 
 impl Drop for State {
     fn drop(&mut self) {
@@ -174,7 +174,11 @@ impl State {
         term_write!(&mut lock, "\x1b[2J\x1b[H")?;
 
         for n_line in 0..self.window_size.row - 2 {
-            term_write!(&mut lock, "~  ")?;
+            if n_line < self.text_lines.len() {
+                term_write!(&mut lock, "{n_line:>3} ")?;
+            } else {
+                term_write!(&mut lock, "~   ")?;
+            }
 
             let is_cursor_line = n_line == self.cursor_pos.row;
 
