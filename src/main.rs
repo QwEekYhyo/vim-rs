@@ -175,7 +175,7 @@ impl State {
 
         for n_line in 0..self.window_size.row - 2 {
             if n_line < self.text_lines.len() {
-                term_write!(&mut lock, "{n_line:>3} ")?;
+                term_write!(&mut lock, "{:>3} ", n_line + 1 + self.text_offset)?;
             } else {
                 term_write!(&mut lock, "~   ")?;
             }
