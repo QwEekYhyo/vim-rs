@@ -442,6 +442,26 @@ impl State {
                 if self.cursor_pos.col != 0 && buffer.start.pop().is_some() {
                     self.cursor_pos.col -= 1;
                     self.dirty = true;
+                } else if self.cursor_pos.row + self.text_offset != 0
+                    && let Some(line) = self.get_current_line_mut()
+                {
+                    line.clear();
+                    let lines_below =
+                        &mut self.text_lines[self.cursor_pos.row + self.text_offset..];
+                    lines_below.rotate_left(1);
+
+                    self.dirty = true;
+
+                    if self.cursor_pos.row == 0 {
+                        self.text_offset -= 1;
+                    } else {
+                        self.cursor_pos.row -= 1;
+                    }
+
+                    buffer
+                        .start
+                        .extend(self.text_lines[self.cursor_pos.row + self.text_offset].chars());
+                    self.cursor_pos.col = buffer.start.len();
                 }
             }
             Key::Enter => {
